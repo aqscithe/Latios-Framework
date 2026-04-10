@@ -147,6 +147,8 @@ namespace Latios.Psyshock
                     return AabbFrom(colliderToCast.m_triangle, in castStart, castEnd);
                 case ColliderType.Convex:
                     return AabbFrom(colliderToCast.m_convex, in castStart, castEnd);
+                case ColliderType.TriMesh:
+                    return AabbFrom(colliderToCast.m_triMesh(), in castStart, castEnd);
                 case ColliderType.Compound:
                     return AabbFrom(colliderToCast.m_compound(), in castStart, castEnd);
                 case ColliderType.Terrain:
