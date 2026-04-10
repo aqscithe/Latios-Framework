@@ -1,4 +1,3 @@
-using Latios.Kinemation.InternalSourceGen;
 using Latios.Psyshock;
 using Latios.Transforms.Abstract;
 using Unity.Burst;
@@ -25,7 +24,7 @@ namespace Latios.Kinemation.Systems
     public partial struct LatiosRenderBoundsUpdateSystem : ISystem
     {
         EntityQuery                      m_WorldRenderBounds;
-        WorldTransformReadOnlyTypeHandle m_worldTransformHandle;
+        WorldTransformReadOnlyAspect.TypeHandle m_worldTransformHandle;
 
         [BurstCompile]
         public void OnCreate(ref SystemState state)
@@ -33,7 +32,7 @@ namespace Latios.Kinemation.Systems
             m_WorldRenderBounds = state.Fluent().With<ChunkWorldRenderBounds>(false, true).With<WorldRenderBounds>(false).With<RenderBounds>(true)
                                   .WithWorldTransformReadOnly().Build();
 
-            m_worldTransformHandle = new WorldTransformReadOnlyTypeHandle(ref state);
+            m_worldTransformHandle = new WorldTransformReadOnlyAspect.TypeHandle(ref state);
         }
 
         [BurstCompile]
@@ -50,7 +49,6 @@ namespace Latios.Kinemation.Systems
                 chunkWorldRenderBoundsHandle                 = GetComponentTypeHandle<ChunkWorldRenderBounds>(),
                 shaderEffectRadialBoundsHandle               = GetComponentTypeHandle<ShaderEffectRadialBounds>(true),
                 copyDeformFromEntityHandle                   = GetComponentTypeHandle<CopyDeformFromEntity>(true),
-                disableComputeTagHandle                      = GetComponentTypeHandle<DisableComputeShaderProcessingTag>(true),
                 esil                                         = GetEntityStorageInfoLookup(),
                 lastSystemVersion                            = state.LastSystemVersion,
                 skeletonDependentHandle                      = GetComponentTypeHandle<SkeletonDependent>(true),
@@ -63,12 +61,11 @@ namespace Latios.Kinemation.Systems
         unsafe struct BoundsJob : IJobChunk
         {
             [ReadOnly] public ComponentTypeHandle<RenderBounds>                       renderBoundsHandle;
-            [ReadOnly] public WorldTransformReadOnlyTypeHandle                        worldTransformHandle;
+            [ReadOnly] public WorldTransformReadOnlyAspect.TypeHandle                        worldTransformHandle;
             [ReadOnly] public ComponentTypeHandle<PostProcessMatrix>                  postProcessMatrixHandle;
             [ReadOnly] public ComponentTypeHandle<ShaderEffectRadialBounds>           shaderEffectRadialBoundsHandle;
             [ReadOnly] public ComponentTypeHandle<SkeletonDependent>                  skeletonDependentHandle;
             [ReadOnly] public ComponentTypeHandle<CopyDeformFromEntity>               copyDeformFromEntityHandle;
-            [ReadOnly] public ComponentTypeHandle<DisableComputeShaderProcessingTag>  disableComputeTagHandle;
             [ReadOnly] public ComponentLookup<SkeletonWorldBoundsOffsetsFromPosition> skeletonWorldBoundsOffsetsFromPositionLookup;
             [ReadOnly] public EntityStorageInfoLookup                                 esil;
             public ComponentTypeHandle<WorldRenderBounds>                             worldRenderBoundsHandle;
@@ -79,13 +76,15 @@ namespace Latios.Kinemation.Systems
             [NoAlias, NativeDisableUnsafePtrRestriction] SkeletonWorldBoundsOffsetsFromPosition* tempSkeletonOffsetsBuffer;
             bool                                                                                 skeletonBufferFilled;
 
+            HasChecker<DisableComputeShaderProcessingTag> disableComputeChecker;
+
             public void Execute(in ArchetypeChunk chunk, int unfilteredChunkIndex, bool useEnabledMask, in v128 chunkEnabledMask)
             {
                 var worldTransformChanged = worldTransformHandle.DidChange(in chunk, lastSystemVersion);
                 var renderBoundsChanged   = chunk.DidChange(ref renderBoundsHandle, lastSystemVersion);
                 var skeletonDependents    = chunk.GetComponentDataPtrRO(ref skeletonDependentHandle);
                 var copyDeforms           = chunk.GetComponentDataPtrRO(ref copyDeformFromEntityHandle);
-                if (chunk.Has(ref disableComputeTagHandle))
+                if (disableComputeChecker[chunk])
                 {
                     skeletonDependents = null;
                     copyDeforms        = null;
@@ -214,12 +213,12 @@ namespace Latios.Kinemation.Systems
                 }
             }
 
-            bool DidOtherTransformChange(ref WorldTransformReadOnlyTypeHandle handle, Entity entity)
+            bool DidOtherTransformChange(ref WorldTransformReadOnlyAspect.TypeHandle handle, Entity entity)
             {
                 return handle.DidChange(esil[entity].Chunk, lastSystemVersion);
             }
 
-            bool DidOtherDependentsTransformChange(ref WorldTransformReadOnlyTypeHandle handle, Entity dependent)
+            bool DidOtherDependentsTransformChange(ref WorldTransformReadOnlyAspect.TypeHandle handle, Entity dependent)
             {
                 var dependentInfo = esil[dependent];
                 var dependents    = dependentInfo.Chunk.GetComponentDataPtrRO(ref skeletonDependentHandle);
@@ -231,7 +230,7 @@ namespace Latios.Kinemation.Systems
             void ComputeChunkAabbOnly(in ArchetypeChunk chunk)
             {
                 var bounds = chunk.GetComponentDataPtrRO(ref worldRenderBoundsHandle);
-                var aabb = new Aabb(float.MaxValue, float.MinValue);
+                var aabb   = new Aabb(float.MaxValue, float.MinValue);
                 for (int i = 0; i < chunk.Count; i++)
                     aabb = Physics.CombineAabb(aabb, new Aabb(bounds[i].Value.Min, bounds[i].Value.Max));
                 Physics.GetCenterExtents(aabb, out var center, out var extents);

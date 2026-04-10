@@ -1,5 +1,4 @@
 using Latios.Calci;
-using Latios.Kinemation.InternalSourceGen;
 using Latios.Psyshock;
 using Latios.Transforms;
 using Latios.Transforms.Abstract;
@@ -27,7 +26,7 @@ namespace Latios.Kinemation.Systems
         EntityQuery m_exposedBonesQuery;
         EntityQuery m_optimizedSkeletonsQuery;
 
-        WorldTransformReadOnlyTypeHandle m_worldTransformHandle;
+        WorldTransformReadOnlyAspect.TypeHandle m_worldTransformHandle;
 
         public void OnCreate(ref SystemState state)
         {
@@ -41,7 +40,7 @@ namespace Latios.Kinemation.Systems
             m_optimizedSkeletonsQuery = state.Fluent().With<OptimizedBoneBounds, OptimizedSkeletonState, OptimizedBoneTransform>(true)
                                         .With<SkeletonWorldBoundsOffsetsFromPosition>(false).WithWorldTransformReadOnly().Build();
 
-            m_worldTransformHandle = new WorldTransformReadOnlyTypeHandle(ref state);
+            m_worldTransformHandle = new WorldTransformReadOnlyAspect.TypeHandle(ref state);
         }
 
         [BurstCompile]
@@ -139,7 +138,7 @@ namespace Latios.Kinemation.Systems
         {
             [ReadOnly] public ComponentTypeHandle<BoneBounds>       boneBoundsHandle;
             [ReadOnly] public ComponentTypeHandle<BoneCullingIndex> indexHandle;
-            [ReadOnly] public WorldTransformReadOnlyTypeHandle      worldTransformHandle;
+            [ReadOnly] public WorldTransformReadOnlyAspect.TypeHandle      worldTransformHandle;
             [ReadOnly] public NativeReference<int>                  maxBitIndex;
 
             public ComponentTypeHandle<BoneWorldBounds>                              boneWorldBoundsHandle;
@@ -344,7 +343,7 @@ namespace Latios.Kinemation.Systems
         [BurstCompile]
         struct GatherExposedSkeletonBoundsJob : IJobChunk
         {
-            [ReadOnly] public WorldTransformReadOnlyTypeHandle                 worldTransformHandle;
+            [ReadOnly] public WorldTransformReadOnlyAspect.TypeHandle                 worldTransformHandle;
             [ReadOnly] public ComponentTypeHandle<ExposedSkeletonCullingIndex> indexHandle;
             [ReadOnly] public NativeArray<UnsafeBitArray>                      perThreadBitArrays;
             [ReadOnly] public NativeArray<UnsafeList<Aabb> >                   perThreadBoundsArrays;
@@ -406,7 +405,7 @@ namespace Latios.Kinemation.Systems
             [ReadOnly] public BufferTypeHandle<OptimizedBoneBounds>            boneBoundsHandle;
             [ReadOnly] public BufferTypeHandle<OptimizedBoneTransform>         boneTransformHandle;
             [ReadOnly] public ComponentTypeHandle<OptimizedSkeletonState>      stateHandle;
-            [ReadOnly] public WorldTransformReadOnlyTypeHandle                 worldTransformHandle;
+            [ReadOnly] public WorldTransformReadOnlyAspect.TypeHandle                 worldTransformHandle;
             public ComponentTypeHandle<SkeletonWorldBoundsOffsetsFromPosition> skeletonBoundsHandle;
 
             public uint lastSystemVersion;
