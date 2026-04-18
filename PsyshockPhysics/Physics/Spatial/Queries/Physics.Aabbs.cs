@@ -120,7 +120,7 @@ namespace Latios.Psyshock
             var aabbStart = AabbFrom(in colliderToCast, castStart);
             var diff      = castEnd - castStart.pos;
             var aabbEnd   = new Aabb(aabbStart.min + diff, aabbStart.max + diff);
-            return CombineAabb(aabbStart, aabbEnd);.15.0
+            return CombineAabb(aabbStart, aabbEnd);
         }
 
         [Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")]
@@ -276,4 +276,3 @@ namespace Latios.Psyshock
         #endregion
     }
 }
-
