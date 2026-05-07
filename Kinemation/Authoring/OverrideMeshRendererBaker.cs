@@ -484,6 +484,10 @@ namespace Latios.Kinemation.Authoring
             var meshFilter = GetComponent<MeshFilter>();
             var mesh       = (meshFilter != null) ? GetComponent<MeshFilter>().sharedMesh : null;
 
+            // TEMP LOCAL FIX - DON'T MERGE!!
+            if (mesh == null)
+                return;
+
             m_materialsCache.Clear();
             authoring.GetSharedMaterials(m_materialsCache);
 
