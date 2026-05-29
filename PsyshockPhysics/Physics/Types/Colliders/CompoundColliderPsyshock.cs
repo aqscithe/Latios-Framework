@@ -221,6 +221,57 @@ namespace Latios.Psyshock
             return blobBuilder.CreateBlobAssetReference<CompoundColliderBlob>(allocator);
         }
 
+        /// <summary>
+        /// Constructs a compound collider blob out of an array of oriented box colliders.
+        /// Each entry in <paramref name="boxes"/> contributes its halfSize as the local extents
+        /// and its center as the world-space position; the parallel entry in <paramref name="rotations"/>
+        /// is the box's orientation about that position. Mirrors the axis-aligned fast-path overload
+        /// otherwise, including its mid-phase build and bounding-volume computation.
+        /// </summary>
+        public static BlobAssetReference<CompoundColliderBlob> BuildBlob(ref BlobBuilder blobBuilder,
+                                                                         ReadOnlySpan<BoxCollider>        boxes,
+                                                                         ReadOnlySpan<quaternion>         rotations,
+                                                                         float3 centerOfMass,
+                                                                         float3x3 gyrationTensor,
+                                                                         AllocatorManager.AllocatorHandle allocator)
+        {
+            if (boxes.Length != rotations.Length)
+                throw new ArgumentException($"boxes.Length ({boxes.Length}) must equal rotations.Length ({rotations.Length}).");
+
+            ref var root              = ref blobBuilder.ConstructRoot<CompoundColliderBlob>();
+            var     colliders         = blobBuilder.Allocate(ref root.colliders, boxes.Length);
+            var     transforms        = blobBuilder.Allocate(ref root.transforms, boxes.Length);
+            float   maxAnchorOffsetSq = 0f;
+            var     aabb              = new Aabb { min = float.MaxValue, max = float.MinValue };
+            var     anchorAabb        = aabb;
+            for (int i = 0; i < boxes.Length; i++)
+            {
+                var box           = boxes[i];
+                var rot           = rotations[i];
+                colliders[i]      = new BoxCollider(float3.zero, box.halfSize);
+                transforms[i]     = new RigidTransform(rot, box.center);
+
+                var R         = new float3x3(rot);
+                var worldHalf = math.abs(R.c0) * box.halfSize.x + math.abs(R.c1) * box.halfSize.y + math.abs(R.c2) * box.halfSize.z;
+                aabb              = Physics.CombineAabb(aabb, new Aabb(box.center - worldHalf, box.center + worldHalf));
+                anchorAabb        = Physics.CombineAabb(box.center, anchorAabb);
+                maxAnchorOffsetSq = math.max(maxAnchorOffsetSq, math.lengthsq(box.halfSize));
+            }
+
+            root.localAabb                        = aabb;
+            root.anchorsAabb                      = anchorAabb;
+            root.maxOffsetFromAnchors             = math.sqrt(maxAnchorOffsetSq);
+            root.centerOfMass                     = centerOfMass;
+            root.inertiaTensor                    = gyrationTensor;
+            var diagonal                          = UnitySim.LocalInertiaTensorDiagonal.ApproximateFrom(root.inertiaTensor);
+            root.unscaledInertiaTensorDiagonal    = diagonal.inertiaDiagonal;
+            root.unscaledInertiaTensorOrientation = diagonal.tensorOrientation;
+
+            BuildMidPhase(ref blobBuilder, ref root, transforms);
+
+            return blobBuilder.CreateBlobAssetReference<CompoundColliderBlob>(allocator);
+        }
+
         internal static void BuildMidPhase(ref BlobBuilder builder, ref CompoundColliderBlob root, BlobBuilderArray<RigidTransform> blobTransforms)
         {
             using var tsa       = ThreadStackAllocator.GetAllocator();
