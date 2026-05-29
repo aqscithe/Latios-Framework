@@ -1,16 +1,39 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using Latios.Transforms;
-using Latios.Transforms.Abstract;
+using Latios.Unsafe;
 using Unity.Burst.CompilerServices;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Entities;
 using Unity.Mathematics;
+using Unity.Transforms;
 
 namespace Latios.Kinemation
 {
-    public readonly partial struct OptimizedSkeletonAspect
+    internal struct OptimizedSkeletonWorldTransform
+    {
+#if LATIOS_TRANSFORMS_UNITY
+        public TransformQvvs worldTransform;
+        public bool requiresSocketPropagation => false;
+        public OptimizedSkeletonWorldTransform(Unity.Transforms.LocalToWorld localToWorld)
+        {
+            var ltw = localToWorld.Value;
+            worldTransform = new TransformQvvs(ltw.Translation(), ltw.Rotation(), ltw.Scale().x, 1f);
+        }
+#else
+        public TransformAspect transformAspect;
+        public TransformQvvs worldTransform => transformAspect.worldTransform;
+        public bool requiresSocketPropagation => true;
+        public OptimizedSkeletonWorldTransform(TransformAspect ta)
+        {
+            transformAspect = ta;
+        }
+#endif
+    }
+
+    public partial struct OptimizedSkeletonAspect
     {
 #if !LATIOS_DISABLE_ACL
         internal bool BeginSampleTrueIfAdditive(out NativeArray<AclUnity.Qvvs> targetLocalTransforms)
@@ -178,7 +201,10 @@ namespace Latios.Kinemation
                 var parent = math.max(0, parentIndices[i]);
                 var local  = localTransforms[i];
                 local.NormalizeBone();
-                rootTransforms[i] = qvvs.mul(rootTransforms[parent], in local);
+                var context32     = rootTransforms[i].context32;
+                var temp          = qvvs.mul(rootTransforms[parent], in local);
+                temp.context32    = context32;
+                rootTransforms[i] = temp;
             }
             {
                 var local = localTransforms[0];
@@ -186,6 +212,29 @@ namespace Latios.Kinemation
                 localTransforms[0] = local;
                 rootTransforms[0]  = local;
             }
+#if !LATIOS_TRANSFORMS_UNITY
+            // Assuming a 1 MB stack size, then the max struct size for the max bone count we can fit is 32 bytes (actually a little less in practice).
+            // Batch commands are bigger than that, so we have to use the ThreadStackAllocator.
+            var tsa             = ThreadStackAllocator.GetAllocator();
+            var commands        = tsa.AllocateAsSpan<TransformBatchWriteCommand>(m_socketCount);
+            int commandsWritten = 0;
+            for (int i = 1; i < boneCount; i++)
+            {
+                if (rootTransforms[i].context32 > 0)
+                {
+                    var rootTransform         = rootTransforms[i];
+                    var socketHandle          = m_worldTransform.transformAspect.entityInHierarchyHandle.GetFromIndexInHierarchy(rootTransform.context32);
+                    var socketTransform       = m_worldTransform.transformAspect[socketHandle];
+                    rootTransform.context32   = socketTransform.worldTransform.context32;
+                    commands[commandsWritten] = TransformBatchWriteCommand.SetLocalTransformQvvs(socketTransform, in rootTransform);
+                    commandsWritten++;
+                }
+            }
+            commands = commands.Slice(0, commandsWritten);
+            commands.ApplyTransforms();
+            tsa.Dispose();
+#endif
+
             m_skeletonState.ValueRW.state &= ~(OptimizedSkeletonState.Flags.NeedsSync | OptimizedSkeletonState.Flags.NextSampleShouldAdd);
             m_skeletonState.ValueRW.state |= OptimizedSkeletonState.Flags.IsDirty;
             SyncHistory();
@@ -195,18 +244,19 @@ namespace Latios.Kinemation
         {
             var ptr = (TransformQvvs*)bones.GetUnsafePtr();
             for (int i = 0; i < bones.Length; i++)
-                ptr[i].worldIndex = math.asint(1f);
+                ptr[i].context32 = math.asint(1f);
         }
     }
 
     public partial struct OptimizedBone
     {
-        internal WorldTransformReadOnlyAspect                   m_skeletonWorldTransform;
+        internal OptimizedSkeletonWorldTransform                m_skeletonWorldTransform;
         internal RefRO<OptimizedSkeletonHierarchyBlobReference> m_skeletonHierarchyBlobRef;
         internal RefRW<OptimizedSkeletonState>                  m_skeletonState;
         internal DynamicBuffer<OptimizedBoneTransform>          m_boneTransforms;
         internal short                                          m_index;
         internal short                                          m_boneCount;
+        internal short                                          m_socketCount;
 
         bool m_isDirty
         {
@@ -250,7 +300,7 @@ namespace Latios.Kinemation
         int m_twoAgoRootIndex => OptimizedSkeletonState.TwoAgoFromMask[m_rotationMask] * m_boneCount * 2 + m_index;
 
         ref BlobArray<BlobArray<short> > m_allChildrenIndices => ref m_skeletonHierarchyBlobRef.ValueRO.blob.Value.childrenIndices;
-        TransformQvvs m_skeletonWorldQvvs => m_skeletonWorldTransform.worldTransformQvvs;
+        TransformQvvs m_skeletonWorldQvvs => m_skeletonWorldTransform.worldTransform;
 
         bool TryGetParentRootIndexIgnoreRootBone(int boneRootIndex, out int parentIndex)
         {
@@ -271,65 +321,317 @@ namespace Latios.Kinemation
             return false;
         }
 
-        void PropagatePositionChangeToChildren(ref BlobArray<BlobArray<short> > childrenIndicesBlob, in TransformQvvs rootTransform, int currentRootBaseIndex, int changedBoneIndex)
+        struct ParentChild
         {
-            ref var children = ref childrenIndicesBlob[changedBoneIndex];
-            for (int i = 0; i < children.Length; i++)
+            public short parent;
+            public short child;
+        }
+
+        ref struct PropagationQueue
+        {
+            Span<ParentChild> m_queue;
+            int               m_next;
+            int               m_count;
+
+            public PropagationQueue(Span<ParentChild> buffer)
             {
-                var     childIndex          = children[i];
-                ref var local               = ref m_boneTransforms.ElementAt(currentRootBaseIndex + m_boneCount + childIndex);
-                ref var root                = ref m_boneTransforms.ElementAt(currentRootBaseIndex + childIndex);
-                root.boneTransform.position = qvvs.TransformPoint(in rootTransform, local.boneTransform.position);
-                PropagatePositionChangeToChildren(ref childrenIndicesBlob, in root.boneTransform, currentRootBaseIndex, childIndex);
+                m_queue = buffer;
+                m_next  = 0;
+                m_count = 0;
+            }
+
+            public void EnqueueChildren(int parentIndex, ref BlobArray<BlobArray<short> > childrenIndicesBlob)
+            {
+                short   parent   = (short)parentIndex;
+                ref var children = ref childrenIndicesBlob[parentIndex];
+                for (int i = 0; i < children.Length; i++)
+                {
+                    m_queue[m_count + m_next + i] = new ParentChild { parent = parent, child = children[i] };
+                }
+                m_count += children.Length;
+            }
+
+            public bool TryDequeue(out ParentChild result)
+            {
+                if (m_count == 0)
+                {
+                    result = default;
+                    return false;
+                }
+
+                result = m_queue[m_next];
+                m_count--;
+                m_next++;
+                return true;
             }
         }
 
-        void PropagateRotationChangeToChildren(ref BlobArray<BlobArray<short> > childrenIndicesBlob, in TransformQvvs rootTransform, int currentRootBaseIndex, int changedBoneIndex)
+        ref struct SocketUpdater
         {
-            ref var children = ref childrenIndicesBlob[changedBoneIndex];
-            for (int i = 0; i < children.Length; i++)
+#if !LATIOS_TRANSFORMS_UNITY
+            TransformAspect                  referenceTransformAspect;
+            ThreadStackAllocator             tsa;
+            Span<TransformBatchWriteCommand> commands;
+            int                              commandCount;
+#endif
+
+            public SocketUpdater(OptimizedSkeletonWorldTransform skeletonWorldTransform, int socketCount)
             {
-                var     childIndex          = children[i];
-                ref var local               = ref m_boneTransforms.ElementAt(currentRootBaseIndex + m_boneCount + childIndex);
-                ref var root                = ref m_boneTransforms.ElementAt(currentRootBaseIndex + childIndex);
-                root.boneTransform.position = qvvs.TransformPoint(in rootTransform, local.boneTransform.position);
-                root.boneTransform.rotation = qvvs.TransformRotation(in rootTransform, local.boneTransform.rotation);
-                PropagateRotationChangeToChildren(ref childrenIndicesBlob, in root.boneTransform, currentRootBaseIndex, childIndex);
+#if !LATIOS_TRANSFORMS_UNITY
+                referenceTransformAspect = skeletonWorldTransform.transformAspect;
+                tsa                      = ThreadStackAllocator.GetAllocator();
+                commands                 = tsa.AllocateAsSpan<TransformBatchWriteCommand>(socketCount);
+                commandCount             = 0;
+#endif
+            }
+
+            public void ApplyAndDispose()
+            {
+#if !LATIOS_TRANSFORMS_UNITY
+                commands.ApplyTransforms();
+                tsa.Dispose();
+#endif
+            }
+
+            public void SetTransform(int socketTransformHierarchyIndex, TransformQvvs transform)
+            {
+#if !LATIOS_TRANSFORMS_UNITY
+                if (socketTransformHierarchyIndex < 0)
+                    return;
+                var handle             = referenceTransformAspect.entityInHierarchyHandle.GetFromIndexInHierarchy(socketTransformHierarchyIndex);
+                var socket             = referenceTransformAspect[handle];
+                transform.context32    = socket.context32;
+                commands[commandCount] = TransformBatchWriteCommand.SetLocalTransformQvvs(socket, in transform);
+#endif
+            }
+
+            public void SetPosition(int socketTransformHierarchyIndex, float3 position)
+            {
+#if !LATIOS_TRANSFORMS_UNITY
+                if (socketTransformHierarchyIndex < 0)
+                    return;
+                var handle             = referenceTransformAspect.entityInHierarchyHandle.GetFromIndexInHierarchy(socketTransformHierarchyIndex);
+                var socket             = referenceTransformAspect[handle];
+                commands[commandCount] = TransformBatchWriteCommand.SetLocalPosition(socket, position);
+#endif
+            }
+
+            public void SetRotation(int socketTransformHierarchyIndex, quaternion rotation)
+            {
+#if !LATIOS_TRANSFORMS_UNITY
+                if (socketTransformHierarchyIndex < 0)
+                    return;
+                var handle             = referenceTransformAspect.entityInHierarchyHandle.GetFromIndexInHierarchy(socketTransformHierarchyIndex);
+                var socket             = referenceTransformAspect[handle];
+                commands[commandCount] = TransformBatchWriteCommand.SetLocalRotation(socket, rotation);
+#endif
+            }
+
+            public void SetPositionRotation(int socketTransformHierarchyIndex, float3 position, quaternion rotation)
+            {
+#if !LATIOS_TRANSFORMS_UNITY
+                if (socketTransformHierarchyIndex < 0)
+                    return;
+                var handle = referenceTransformAspect.entityInHierarchyHandle.GetFromIndexInHierarchy(socketTransformHierarchyIndex);
+                var socket = referenceTransformAspect[handle];
+                // Todo: Switch to explicit position-rotation command when that is supported.
+                var localScale         = socket.localScale;
+                commands[commandCount] = TransformBatchWriteCommand.SetLocalTransform(socket, new TransformQvs(position, rotation, localScale));
+#endif
+            }
+
+            public void SetScale(int socketTransformHierarchyIndex, float scale)
+            {
+#if !LATIOS_TRANSFORMS_UNITY
+                if (socketTransformHierarchyIndex < 0)
+                    return;
+                var handle             = referenceTransformAspect.entityInHierarchyHandle.GetFromIndexInHierarchy(socketTransformHierarchyIndex);
+                var socket             = referenceTransformAspect[handle];
+                commands[commandCount] = TransformBatchWriteCommand.SetLocalScale(socket, scale);
+#endif
+            }
+
+            public void SetPositionScale(int socketTransformHierarchyIndex, float3 position, float scale)
+            {
+#if !LATIOS_TRANSFORMS_UNITY
+                if (socketTransformHierarchyIndex < 0)
+                    return;
+                var handle = referenceTransformAspect.entityInHierarchyHandle.GetFromIndexInHierarchy(socketTransformHierarchyIndex);
+                var socket = referenceTransformAspect[handle];
+                // Todo: Switch to explicit position-scale command when that is supported.
+                var localRotation      = socket.localRotation;
+                commands[commandCount] = TransformBatchWriteCommand.SetLocalTransform(socket, new TransformQvs(position, localRotation, scale));
+#endif
+            }
+
+            public void SetStretch(int socketTransformHierarchyIndex, float3 stretch)
+            {
+#if !LATIOS_TRANSFORMS_UNITY
+                if (socketTransformHierarchyIndex < 0)
+                    return;
+                var handle             = referenceTransformAspect.entityInHierarchyHandle.GetFromIndexInHierarchy(socketTransformHierarchyIndex);
+                var socket             = referenceTransformAspect[handle];
+                commands[commandCount] = TransformBatchWriteCommand.SetStretch(socket, stretch);
+#endif
             }
         }
 
-        void PropagateScaleChangeToChildren(ref BlobArray<BlobArray<short> > childrenIndicesBlob, in TransformQvvs rootTransform, int currentRootBaseIndex, int changedBoneIndex)
+        void PropagatePositionChangeToChildren(ref BlobArray<BlobArray<short> > childrenIndicesBlob, ref SocketUpdater socketUpdater, int currentRootBaseIndex,
+                                               int changedBoneIndex)
         {
-            ref var children = ref childrenIndicesBlob[changedBoneIndex];
-            for (int i = 0; i < children.Length; i++)
+            var queue = new PropagationQueue(stackalloc ParentChild[childrenIndicesBlob.Length - changedBoneIndex]);
+            queue.EnqueueChildren(changedBoneIndex, ref childrenIndicesBlob);
+            var bones = m_boneTransforms.AsNativeArray().AsSpan();
+            while (queue.TryDequeue(out var parentChild))
             {
-                var     childIndex          = children[i];
-                ref var local               = ref m_boneTransforms.ElementAt(currentRootBaseIndex + m_boneCount + childIndex);
-                ref var root                = ref m_boneTransforms.ElementAt(currentRootBaseIndex + childIndex);
-                root.boneTransform.position = qvvs.TransformPoint(in rootTransform, local.boneTransform.position);
-                root.boneTransform.scale    = qvvs.TransformScale(in rootTransform, local.boneTransform.scale);
-                PropagateScaleChangeToChildren(ref childrenIndicesBlob, in root.boneTransform, currentRootBaseIndex, childIndex);
+                ref var childLocal               = ref bones[currentRootBaseIndex + m_boneCount + parentChild.child];
+                ref var childRoot                = ref bones[currentRootBaseIndex + parentChild.child];
+                ref var parentRoot               = ref bones[currentRootBaseIndex + parentChild.parent];
+                childRoot.boneTransform.position = qvvs.TransformPoint(in parentRoot.boneTransform, childLocal.boneTransform.position);
+                socketUpdater.SetPosition(childRoot.boneTransform.context32, childRoot.boneTransform.position);
+                queue.EnqueueChildren(parentChild.child, ref childrenIndicesBlob);
             }
         }
 
-        void PropagateStretchChangeToChildren(ref BlobArray<BlobArray<short> > childrenIndicesBlob, in TransformQvvs rootTransform, int currentRootBaseIndex, int changedBoneIndex)
+        void PropagateRotationChangeToChildren(ref BlobArray<BlobArray<short> > childrenIndicesBlob, ref SocketUpdater socketUpdater, int currentRootBaseIndex,
+                                               int changedBoneIndex)
+        {
+            var queue = new PropagationQueue(stackalloc ParentChild[childrenIndicesBlob.Length - changedBoneIndex]);
+            queue.EnqueueChildren(changedBoneIndex, ref childrenIndicesBlob);
+            var bones = m_boneTransforms.AsNativeArray().AsSpan();
+            while (queue.TryDequeue(out var parentChild))
+            {
+                ref var childLocal               = ref bones[currentRootBaseIndex + m_boneCount + parentChild.child];
+                ref var childRoot                = ref bones[currentRootBaseIndex + parentChild.child];
+                ref var parentRoot               = ref bones[currentRootBaseIndex + parentChild.parent];
+                childRoot.boneTransform.position = qvvs.TransformPoint(in parentRoot.boneTransform, childLocal.boneTransform.position);
+                childRoot.boneTransform.rotation = qvvs.TransformRotation(in parentRoot.boneTransform, childLocal.boneTransform.rotation);
+                socketUpdater.SetPositionRotation(childRoot.boneTransform.context32, childRoot.boneTransform.position, childRoot.boneTransform.rotation);
+                queue.EnqueueChildren(parentChild.child, ref childrenIndicesBlob);
+            }
+        }
+
+        void PropagateScaleChangeToChildren(ref BlobArray<BlobArray<short> > childrenIndicesBlob, ref SocketUpdater socketUpdater, int currentRootBaseIndex, int changedBoneIndex)
+        {
+            var queue = new PropagationQueue(stackalloc ParentChild[childrenIndicesBlob.Length - changedBoneIndex]);
+            queue.EnqueueChildren(changedBoneIndex, ref childrenIndicesBlob);
+            var bones = m_boneTransforms.AsNativeArray().AsSpan();
+            while (queue.TryDequeue(out var parentChild))
+            {
+                ref var childLocal               = ref bones[currentRootBaseIndex + m_boneCount + parentChild.child];
+                ref var childRoot                = ref bones[currentRootBaseIndex + parentChild.child];
+                ref var parentRoot               = ref bones[currentRootBaseIndex + parentChild.parent];
+                childRoot.boneTransform.position = qvvs.TransformPoint(in parentRoot.boneTransform, childLocal.boneTransform.position);
+                childRoot.boneTransform.scale    = qvvs.TransformScale(in parentRoot.boneTransform, childLocal.boneTransform.scale);
+                socketUpdater.SetPositionScale(childRoot.boneTransform.context32, childRoot.boneTransform.position, childRoot.boneTransform.scale);
+                queue.EnqueueChildren(parentChild.child, ref childrenIndicesBlob);
+            }
+        }
+
+        void PropagateStretchChangeToChildren(ref BlobArray<BlobArray<short> > childrenIndicesBlob, ref SocketUpdater socketUpdater, int currentRootBaseIndex, int changedBoneIndex)
         {
             // Stretch affects children root positions, so that is all we have to update.
-            PropagatePositionChangeToChildren(ref childrenIndicesBlob, in rootTransform, currentRootBaseIndex, changedBoneIndex);
+            PropagatePositionChangeToChildren(ref childrenIndicesBlob, ref socketUpdater, currentRootBaseIndex, changedBoneIndex);
         }
 
-        void PropagateTransformChangeToChildren(ref BlobArray<BlobArray<short> > childrenIndicesBlob, in TransformQvvs rootTransform, int currentRootBaseIndex,
+        void PropagateTransformChangeToChildren(ref BlobArray<BlobArray<short> > childrenIndicesBlob,
+                                                ref SocketUpdater socketUpdater,
+                                                int currentRootBaseIndex,
                                                 int changedBoneIndex)
         {
-            ref var children = ref childrenIndicesBlob[changedBoneIndex];
-            for (int i = 0; i < children.Length; i++)
+            var queue = new PropagationQueue(stackalloc ParentChild[childrenIndicesBlob.Length - changedBoneIndex]);
+            queue.EnqueueChildren(changedBoneIndex, ref childrenIndicesBlob);
+            var bones = m_boneTransforms.AsNativeArray().AsSpan();
+            while (queue.TryDequeue(out var parentChild))
             {
-                var     childIndex = children[i];
-                ref var local      = ref m_boneTransforms.ElementAt(currentRootBaseIndex + m_boneCount + childIndex);
-                ref var root       = ref m_boneTransforms.ElementAt(currentRootBaseIndex + childIndex);
-                root.boneTransform = qvvs.mul(in rootTransform, local.boneTransform);
-                PropagateTransformChangeToChildren(ref childrenIndicesBlob, in root.boneTransform, currentRootBaseIndex, childIndex);
+                ref var childLocal                = ref bones[currentRootBaseIndex + m_boneCount + parentChild.child];
+                ref var childRoot                 = ref bones[currentRootBaseIndex + parentChild.child];
+                ref var parentRoot                = ref bones[currentRootBaseIndex + parentChild.parent];
+                var     context32                 = childRoot.boneTransform.context32;
+                childRoot.boneTransform           = qvvs.mul(in parentRoot.boneTransform, childLocal.boneTransform);
+                childRoot.boneTransform.context32 = context32;
+                socketUpdater.SetTransform(childRoot.boneTransform.context32, childRoot.boneTransform);
+                queue.EnqueueChildren(parentChild.child, ref childrenIndicesBlob);
             }
+        }
+
+        internal void ApplyRootTransformChanges(Span<TransformQvvs> rootTransformsWithIndices, int currentRootBaseIndex)
+        {
+            rootTransformsWithIndices.Sort(new TransformWithIndicesComparer());
+            var     firstChangedBoneIndex = rootTransformsWithIndices[0].context32;
+            ref var childrenIndicesBlob   = ref m_allChildrenIndices;
+            ref var parentIndicesBlob     = ref m_skeletonHierarchyBlobRef.ValueRO.blob.Value.parentIndices;
+            var     queue                 = new PropagationQueue(stackalloc ParentChild[childrenIndicesBlob.Length - firstChangedBoneIndex]);
+            int     transformSpanIndex    = 0;
+            var     bones                 = m_boneTransforms.AsNativeArray().AsSpan();
+            var     socketUpdater         = new SocketUpdater(m_skeletonWorldTransform, m_socketCount);
+            while (true)
+            {
+                var hasDirtyTransform = transformSpanIndex < rootTransformsWithIndices.Length;
+                var hasNextChild      = queue.TryDequeue(out var parentChild);
+                if (!hasDirtyTransform && !hasNextChild)
+                    break;
+
+                var nextTransformBoneIndex = hasDirtyTransform ? rootTransformsWithIndices[transformSpanIndex].context32 : childrenIndicesBlob.Length;
+                var nextChildIndex         = math.select(childrenIndicesBlob.Length, parentChild.child, hasNextChild);
+                if (nextChildIndex < nextTransformBoneIndex)
+                {
+                    // Do normal propagate from parent
+                    ref var childLocal                = ref bones[currentRootBaseIndex + m_boneCount + parentChild.child];
+                    ref var childRoot                 = ref bones[currentRootBaseIndex + parentChild.child];
+                    ref var parentRoot                = ref bones[currentRootBaseIndex + parentChild.parent];
+                    var     context32                 = childRoot.boneTransform.context32;
+                    childRoot.boneTransform           = qvvs.mul(in parentRoot.boneTransform, childLocal.boneTransform);
+                    childRoot.boneTransform.context32 = context32;
+                    socketUpdater.SetTransform(childRoot.boneTransform.context32, childRoot.boneTransform);
+                    queue.EnqueueChildren(parentChild.child, ref childrenIndicesBlob);
+                }
+                else if (nextChildIndex > nextTransformBoneIndex)
+                {
+                    // We have encountered one of our changed bones.
+                    // If it is the root, we need to not propagate.
+                    if (nextTransformBoneIndex == 0)
+                    {
+                        bones[currentRootBaseIndex + m_boneCount].boneTransform = rootTransformsWithIndices[nextTransformBoneIndex];
+                        bones[currentRootBaseIndex].boneTransform               = rootTransformsWithIndices[nextTransformBoneIndex];
+                    }
+                    else
+                    {
+                        // Recompute the local transform
+                        ref var childLocal                 = ref bones[currentRootBaseIndex + m_boneCount + nextTransformBoneIndex];
+                        ref var childRoot                  = ref bones[currentRootBaseIndex + nextTransformBoneIndex];
+                        ref var parentRoot                 = ref bones[currentRootBaseIndex + parentIndicesBlob[nextTransformBoneIndex]];
+                        var     context32                  = childRoot.boneTransform.context32;
+                        childRoot.boneTransform            = rootTransformsWithIndices[nextTransformBoneIndex];
+                        childRoot.boneTransform.context32  = context32;
+                        childLocal.boneTransform           = qvvs.inversemulqvvs(in parentRoot.boneTransform, in childRoot.boneTransform);
+                        childLocal.boneTransform.context32 = math.asint(1f);
+                        socketUpdater.SetTransform(childRoot.boneTransform.context32, childRoot.boneTransform);
+                        queue.EnqueueChildren(nextTransformBoneIndex, ref childrenIndicesBlob);
+                    }
+                    transformSpanIndex++;
+                }
+                else
+                {
+                    // The changed bone is the same as the next propagated child
+                    ref var childLocal                 = ref bones[currentRootBaseIndex + m_boneCount + parentChild.child];
+                    ref var childRoot                  = ref bones[currentRootBaseIndex + parentChild.child];
+                    ref var parentRoot                 = ref bones[currentRootBaseIndex + parentChild.parent];
+                    var     context32                  = childRoot.boneTransform.context32;
+                    childRoot.boneTransform            = rootTransformsWithIndices[nextTransformBoneIndex];
+                    childRoot.boneTransform.context32  = context32;
+                    childLocal.boneTransform           = qvvs.inversemulqvvs(in parentRoot.boneTransform, in childRoot.boneTransform);
+                    childLocal.boneTransform.context32 = math.asint(1f);
+                    socketUpdater.SetTransform(childRoot.boneTransform.context32, childRoot.boneTransform);
+                    queue.EnqueueChildren(parentChild.child, ref childrenIndicesBlob);
+                    transformSpanIndex++;
+                }
+            }
+        }
+
+        struct TransformWithIndicesComparer : IComparer<TransformQvvs>
+        {
+            public int Compare(TransformQvvs x, TransformQvvs y) => x.context32.CompareTo(y.context32);
         }
 
         [Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")]

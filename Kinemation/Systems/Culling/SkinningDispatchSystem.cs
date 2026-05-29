@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using Latios.Kinemation.InternalSourceGen;
 using Latios.Psyshock;
 using Latios.Transforms;
 using Latios.Transforms.Abstract;
@@ -73,7 +72,7 @@ namespace Latios.Kinemation.Systems
             m_worldTransformHandle = new WorldTransformReadOnlyAspect.TypeHandle(ref state);
             m_worldTransformLookup = new WorldTransformReadOnlyAspect.Lookup(ref state);
 
-            m_skeletonQuery        = state.Fluent().With<DependentSkinnedMesh>(true).With<ChunkPerCameraSkeletonCullingMask>(true, true).Build();
+            m_skeletonQuery        = state.Fluent().With<DependentSkinnedMesh>(true).Build();
             m_skinnedMeshQuery     = state.Fluent().With<SkeletonDependent>(true).With<ChunkPerDispatchCullingMask>(true, true).Build();
             m_skinnedMeshMetaQuery = state.Fluent().With<ChunkHeader>(true).With<ChunkPerDispatchCullingMask>(true).Build();
 
@@ -109,7 +108,18 @@ namespace Latios.Kinemation.Systems
         }
 
         [BurstCompile]
-        public void OnUpdate(ref SystemState state) => m_data.DoUpdate(ref state, ref this);
+        public void OnUpdate(ref SystemState state)
+        {
+            var dispatchData = latiosWorld.worldBlackboardEntity.GetComponentData<DispatchContext>();
+            if (dispatchData.isCustomGraphicsDispatch)
+            {
+                var features = latiosWorld.worldBlackboardEntity.GetComponentData<EnableUpdatingInCustomGraphics>();
+                if (!features.skinning)
+                    return;
+            }
+
+            m_data.DoUpdate(ref state, ref this);
+        }
 
         public CollectState Collect(ref SystemState state)
         {
@@ -119,9 +129,9 @@ namespace Latios.Kinemation.Systems
             var perChunkPrefixSums = CollectionHelper.CreateNativeArray<PerChunkPrefixSums>(skeletonChunkCount,
                                                                                             state.WorldUpdateAllocator,
                                                                                             NativeArrayOptions.UninitializedMemory);
-            var meshChunks        = new NativeList<ArchetypeChunk>(m_skinnedMeshMetaQuery.CalculateEntityCountWithoutFiltering(), state.WorldUpdateAllocator);
-            var requestsBlockList =
-                new UnsafeParallelBlockList(UnsafeUtility.SizeOf<MeshSkinningRequestWithSkeletonTarget>(), 256, state.WorldUpdateAllocator);
+            var meshChunks =
+                new NativeList<ArchetypeChunk>(m_skinnedMeshMetaQuery.CalculateEntityCountWithoutFiltering(), state.WorldUpdateAllocator);
+            var requestsBlockList                        = new UnsafeParallelBlockList<MeshSkinningRequestWithSkeletonTarget>(256, state.WorldUpdateAllocator);
             var groupedSkinningRequestsStartsAndCounts   = new NativeList<int2>(state.WorldUpdateAllocator);
             var groupedSkinningRequests                  = new NativeList<MeshSkinningRequest>(state.WorldUpdateAllocator);
             var skeletonEntityToSkinningRequestsGroupMap = new NativeHashMap<Entity, int>(1, state.WorldUpdateAllocator);
@@ -134,7 +144,6 @@ namespace Latios.Kinemation.Systems
                 chunksToProcess              = meshChunks.AsParallelWriter(),
                 perDispatchCullingMaskHandle = SystemAPI.GetComponentTypeHandle<ChunkPerDispatchCullingMask>(true),
                 perFrameCullingMaskHandle    = SystemAPI.GetComponentTypeHandle<ChunkPerFrameCullingMask>(true),
-                skeletonDependentHandle      = SystemAPI.GetComponentTypeHandle<SkeletonDependent>(true)
             }.ScheduleParallel(m_skinnedMeshMetaQuery, state.Dependency);
 
             collectJh = new CollectVisibleMeshesJob
@@ -235,7 +244,7 @@ namespace Latios.Kinemation.Systems
                 worldTransformLookup         = m_worldTransformLookup,
                 skinnedMeshesBufferHandle    = SystemAPI.GetBufferTypeHandle<DependentSkinnedMesh>(true),
                 skinningStream               = collectState.skinningStream.AsReader(),
-#if !LATIOS_TRANSFORMS_UNCACHED_QVVS && !LATIOS_TRANSFORMS_UNITY
+#if !LATIOS_TRANSFORMS_UNITY
                 previousTransformHandle = SystemAPI.GetComponentTypeHandle<PreviousTransform>(true),
                 previousTransformLookup = SystemAPI.GetComponentLookup<PreviousTransform>(true),
                 twoAgoTransformHandle   = SystemAPI.GetComponentTypeHandle<TwoAgoTransform>(true),
@@ -508,9 +517,10 @@ namespace Latios.Kinemation.Systems
             [ReadOnly] public ComponentTypeHandle<ChunkPerDispatchCullingMask> perDispatchCullingMaskHandle;
             [ReadOnly] public ComponentTypeHandle<ChunkPerFrameCullingMask>    perFrameCullingMaskHandle;
             [ReadOnly] public ComponentTypeHandle<ChunkHeader>                 chunkHeaderHandle;
-            [ReadOnly] public ComponentTypeHandle<SkeletonDependent>           skeletonDependentHandle;
 
             public NativeList<ArchetypeChunk>.ParallelWriter chunksToProcess;
+
+            HasChecker<SkeletonDependent> skeletonDependentChecker;
 
             [Unity.Burst.CompilerServices.SkipLocalsInit]
             public unsafe void Execute(in ArchetypeChunk metaChunk, int unfilteredChunkIndex, bool useEnabledMask, in v128 chunkEnabledMask)
@@ -526,7 +536,7 @@ namespace Latios.Kinemation.Systems
                     var frameMask    = frameMasks[i];
                     var lower        = dispatchMask.lower.Value & (~frameMask.lower.Value);
                     var upper        = dispatchMask.upper.Value & (~frameMask.upper.Value);
-                    if ((lower | upper) != 0 && headers[i].ArchetypeChunk.Has(ref skeletonDependentHandle))
+                    if ((lower | upper) != 0 && skeletonDependentChecker[headers[i].ArchetypeChunk])
                     {
                         chunksCache[chunksCount] = headers[i].ArchetypeChunk;
                         chunksCount++;
@@ -566,7 +576,7 @@ namespace Latios.Kinemation.Systems
             [ReadOnly] public ComponentTypeHandle<PreviousDeformShaderIndex> previousDeformHandle;
             [ReadOnly] public ComponentTypeHandle<TwoAgoDeformShaderIndex>   twoAgoDeformHandle;
 
-            public UnsafeParallelBlockList requestsBlockList;
+            public UnsafeParallelBlockList<MeshSkinningRequestWithSkeletonTarget> requestsBlockList;
 
             [NativeSetThreadIndex]
             int m_nativeThreadIndex;
@@ -828,7 +838,7 @@ namespace Latios.Kinemation.Systems
         [BurstCompile]
         struct GroupRequestsBySkeletonJob : IJob
         {
-            public UnsafeParallelBlockList requestsBlockList;
+            public UnsafeParallelBlockList<MeshSkinningRequestWithSkeletonTarget> requestsBlockList;
 
             public NativeList<MeshSkinningRequest> groupedSkinningRequests;
             public NativeList<int2>                groupedSkinningRequestsStartsAndCounts;
@@ -846,10 +856,8 @@ namespace Latios.Kinemation.Systems
                 {
                     int    i                = 0;
                     Entity previousSkeleton = Entity.Null;
-                    var    enumerator       = requestsBlockList.GetEnumerator();
-                    while (enumerator.MoveNext())
+                    foreach (var request in  requestsBlockList)
                     {
-                        var request = enumerator.GetCurrent<MeshSkinningRequestWithSkeletonTarget>();
                         if (request.skeletonEntity == previousSkeleton)
                         {
                             dstIndices[i] = dstIndices[i - 1];
@@ -896,11 +904,10 @@ namespace Latios.Kinemation.Systems
                 groupedSkinningRequests.ResizeUninitialized(count);
                 var requests = groupedSkinningRequests.AsArray();
                 {
-                    int i          = 0;
-                    var enumerator = requestsBlockList.GetEnumerator();
-                    while (enumerator.MoveNext())
+                    int i = 0;
+                    foreach (var request in requestsBlockList)
                     {
-                        requests[dstIndices[i]] = enumerator.GetCurrent<MeshSkinningRequestWithSkeletonTarget>().request;
+                        requests[dstIndices[i]] = request.request;
                         i++;
                     }
                 }
@@ -1959,7 +1966,7 @@ namespace Latios.Kinemation.Systems
             [ReadOnly] public BufferTypeHandle<BoneReference>         boneReferenceBufferHandle;
             [ReadOnly] public WorldTransformReadOnlyAspect.TypeHandle worldTransformHandle;
             [ReadOnly] public WorldTransformReadOnlyAspect.Lookup     worldTransformLookup;
-#if !LATIOS_TRANSFORMS_UNCACHED_QVVS && !LATIOS_TRANSFORMS_UNITY
+#if !LATIOS_TRANSFORMS_UNITY
             [ReadOnly] public ComponentTypeHandle<PreviousTransform> previousTransformHandle;
             [ReadOnly] public ComponentLookup<PreviousTransform>     previousTransformLookup;
             [ReadOnly] public ComponentTypeHandle<TwoAgoTransform>   twoAgoTransformHandle;
@@ -2005,10 +2012,10 @@ namespace Latios.Kinemation.Systems
 
                 var bonesAccessor           = chunk.GetBufferAccessor(ref boneReferenceBufferHandle);
                 var skeletonWorldTransforms = worldTransformHandle.Resolve(chunk);
-#if !LATIOS_TRANSFORMS_UNCACHED_QVVS && !LATIOS_TRANSFORMS_UNITY
+#if !LATIOS_TRANSFORMS_UNITY
                 var skeletonPreviousTransforms = chunk.GetNativeArray(ref previousTransformHandle);
                 var skeletonTwoAgoTransforms   = chunk.GetNativeArray(ref twoAgoTransformHandle);
-#elif !LATIOS_TRANSFORMS_UNCACHED_QVVS && LATIOS_TRANSFORMS_UNITY
+#elif LATIOS_TRANSFORMS_UNITY
                 var skeletonPreviousTransforms = skeletonWorldTransforms;
                 var skeletonTwoAgoTransform    = skeletonWorldTransforms;
 #endif
@@ -2042,7 +2049,7 @@ namespace Latios.Kinemation.Systems
                     var meshes = meshesAccessor[header.indexInSkeletonChunk].AsNativeArray();
 
                     var history = header.loadOp & SkinningStreamHeader.LoadOp.HistoryMask;
-#if !LATIOS_TRANSFORMS_UNCACHED_QVVS && !LATIOS_TRANSFORMS_UNITY
+#if !LATIOS_TRANSFORMS_UNITY
                     if (history == SkinningStreamHeader.LoadOp.Current)
 #endif
                     {
@@ -2085,7 +2092,7 @@ namespace Latios.Kinemation.Systems
                             prefixSums.boneTransformsToUpload += (uint)offsets.Length;
                         }
                     }
-#if !LATIOS_TRANSFORMS_UNCACHED_QVVS && !LATIOS_TRANSFORMS_UNITY
+#if !LATIOS_TRANSFORMS_UNITY
                     else if (history == SkinningStreamHeader.LoadOp.Previous)
                     {
                         var skeletonWorldTransform = skeletonPreviousTransforms[header.indexInSkeletonChunk].worldTransform;

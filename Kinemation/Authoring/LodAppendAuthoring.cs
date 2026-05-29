@@ -33,15 +33,19 @@ namespace Latios.Kinemation.Authoring
 
         [FormerlySerializedAs("loResMesh")]
         public Mesh lod1Mesh;
-        [FormerlySerializedAs("useOverrideMaterials")]
-        public bool useOverrideMaterialsForLod1;
+        public bool useOverrideMaterialsForLod1 => overrideMaterialsForLod1 != null && overrideMaterialsForLod1.Count > 0;
         [FormerlySerializedAs("overrideMaterials")]
         public List<Material> overrideMaterialsForLod1;
 
-        public bool           enableLod2;
-        public Mesh           lod2Mesh;
-        public bool           useOverrideMaterialsForLod2;
+        public bool enableLod2;
+        public Mesh lod2Mesh;
+        public bool useOverrideMaterialsForLod2 => overrideMaterialsForLod2 != null && overrideMaterialsForLod2.Count > 0;
         public List<Material> overrideMaterialsForLod2;
+
+        public bool disableLod1ShadowCasting;
+        public bool disableLod2ShadowCasting;
+        public bool disableLod1MotionVectors;
+        public bool disableLod2MotionVectors;
     }
 }
 

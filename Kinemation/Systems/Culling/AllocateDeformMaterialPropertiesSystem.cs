@@ -33,6 +33,14 @@ namespace Latios.Kinemation.Systems
         [BurstCompile]
         public void OnUpdate(ref SystemState state)
         {
+            var dispatchContext = latiosWorld.worldBlackboardEntity.GetComponentData<DispatchContext>();
+            if (dispatchContext.isCustomGraphicsDispatch)
+            {
+                var features = latiosWorld.worldBlackboardEntity.GetComponentData<EnableUpdatingInCustomGraphics>();
+                if (!features.dynamicMeshes && !features.blendShapes && !features.skinning)
+                    return;
+            }
+
             var map            = latiosWorld.worldBlackboardEntity.GetCollectionComponent<DeformClassificationMap>(true).deformClassificationMap;
             var meshGpuEntries = latiosWorld.worldBlackboardEntity.GetCollectionComponent<MeshGpuManager>(true).entries.AsDeferredJobArray();
 
@@ -230,11 +238,14 @@ namespace Latios.Kinemation.Systems
 
             public void Execute(in ArchetypeChunk chunk, int unfilteredChunkIndex, bool useEnabledMask, in v128 chunkEnabledMask)
             {
-                var prefixSums   = chunk.GetChunkComponentData(ref metaHandle);
                 var dispatchMask = chunk.GetChunkComponentData(ref perDispatchMaskHandle);
                 var frameMask    = chunk.GetChunkComponentData(ref perFrameMaskHandle);
                 var lower        = dispatchMask.lower.Value & (~frameMask.lower.Value);
                 var upper        = dispatchMask.upper.Value & (~frameMask.upper.Value);
+                if ((upper | lower) == 0)
+                    return;
+
+                var prefixSums = chunk.GetChunkComponentData(ref metaHandle);
 
                 var meshArray      = chunk.GetNativeArray(ref meshHandle);
                 var classification = deformClassificationMap[chunk];

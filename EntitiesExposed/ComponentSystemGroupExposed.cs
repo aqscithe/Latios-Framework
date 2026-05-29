@@ -25,6 +25,37 @@ namespace Unity.Entities.Exposed
         }
 
         public static System.Type GetManagedType(this SystemTypeIndex system) => TypeManager.GetSystemType(system);
+
+        public static unsafe void UpdateWithTracing(this SystemHandle handle, ref SystemState state, WorldUnmanaged worldUnmanaged, ComponentSystemGroupTracing tracing)
+        {
+            if (tracing.OnUpdateBefore.IsCreated)
+                tracing.OnUpdateBefore.Invoke(state.m_SystemTypeIndex, ref state);
+            handle.Update(worldUnmanaged);
+            if (tracing.OnUpdateAfter.IsCreated)
+                tracing.OnUpdateAfter.Invoke(state.m_SystemTypeIndex, ref state);
+        }
+
+        public static unsafe void UpdateWithTracing(this ComponentSystemBase system, ComponentSystemGroupTracing tracing)
+        {
+            ref var state = ref *system.CheckedState();
+            if (tracing.OnUpdateBefore.IsCreated)
+                tracing.OnUpdateBefore.Invoke(state.m_SystemTypeIndex, ref state);
+            system.Update();
+            if (tracing.OnUpdateAfter.IsCreated)
+                tracing.OnUpdateAfter.Invoke(state.m_SystemTypeIndex, ref state);
+        }
+    }
+
+    public struct ComponentSystemGroupTracing
+    {
+        internal Burst.FunctionPointer<ComponentSystemGroup.SystemWrapperDelegate> OnUpdateBefore;
+        internal Burst.FunctionPointer<ComponentSystemGroup.SystemWrapperDelegate> OnUpdateAfter;
+
+        public ComponentSystemGroupTracing(ComponentSystemGroup group)
+        {
+            OnUpdateBefore = group.OnUpdateBefore;
+            OnUpdateAfter  = group.OnUpdateAfter;
+        }
     }
 
     public struct ComponentSystemGroupSystemEnumerator

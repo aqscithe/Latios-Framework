@@ -33,7 +33,7 @@ namespace Latios.Psyshock
                 point            = point,
                 maxDistance      = maxDistance,
                 minHeight        = (short)minInt.y,
-                maxHeight        = (short)minInt.y,
+                maxHeight        = (short)maxInt.y,
                 heightOffset     = terrain.baseHeightOffset,
                 scale            = terrain.scale,
                 terrainTransform = terrainTransform,
@@ -80,7 +80,7 @@ namespace Latios.Psyshock
             {
                 ray              = ray,
                 minHeight        = (short)minInt.y,
-                maxHeight        = (short)minInt.y,
+                maxHeight        = (short)maxInt.y,
                 heightOffset     = terrain.baseHeightOffset,
                 scale            = terrain.scale,
                 terrainTransform = terrainTransform,
@@ -170,6 +170,12 @@ namespace Latios.Psyshock
             triangle.pointB      *= scale;
             triangle.pointC      *= scale;
             return triangle;
+        }
+
+        internal static float3 CreateLocalVertex(ref TerrainColliderBlob blob, int2 heightCoordinate, int heightOffset, float3 scale)
+        {
+            var vertex = new float3(heightCoordinate.x, blob.heights[blob.ToHeight1D(heightCoordinate)] + heightOffset, heightCoordinate.y);
+            return vertex * scale;
         }
     }
 }

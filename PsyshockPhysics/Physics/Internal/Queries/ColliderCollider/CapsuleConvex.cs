@@ -1,3 +1,4 @@
+using Latios.Calci;
 using Unity.Burst;
 using Unity.Mathematics;
 
@@ -31,6 +32,7 @@ namespace Latios.Psyshock
                 featureCodeA = featureCodeA,
                 featureCodeB = featureCodeB
             }, convexTransform);
+            GjkEpa.ValidateGjkEpa(convex, in convexTransform, capsule, in capsuleTransform, in result, result.distance <= maxDistance);
             return result.distance <= maxDistance;
         }
 

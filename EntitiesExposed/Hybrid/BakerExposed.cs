@@ -26,17 +26,6 @@ namespace Unity.Entities.Exposed
         }
     }
 
-    public static class BlobAssetStoreExposedExtensions
-    {
-        public static uint GetTypeHashForBurst<T>(this BlobAssetStore bas) => BlobAssetStore.ComputeTypeHash(typeof(T));
-        public static bool TryAddBlobAssetWithBurstHash<T>(this BlobAssetStore bas, uint typeHash, ref BlobAssetReference<T> blob) where T : unmanaged => bas.TryAdd(ref blob,
-                                                                                                                                                                     typeHash);
-        public static bool TryAddBlobAssetWithBurstHash<T>(this BlobAssetStore bas, Hash128 customHash, uint typeHash,
-                                                           ref BlobAssetReference<T> blob) where T : unmanaged => bas.TryAdd(customHash, typeHash, ref blob);
-        public static bool TryGetBlobAssetWithBurstHash<T>(this BlobAssetStore bas, Hash128 customHash, uint typeHash,
-                                                           out BlobAssetReference<T> blob) where T : unmanaged => bas.TryGet(customHash, typeHash, out blob);
-    }
-
     /// <summary>
     /// Overrides the global list of bakers either adding new ones or replacing old ones.
     /// This is used for tests. Always make sure to dispose to revert the global state back to what it was.
@@ -88,5 +77,15 @@ namespace Unity.Entities.Exposed
             return candidateBakers;
         }
     }
+}
+
+namespace Unity.Entities.Hybrid.Baking
+{
+#if !LATIOS_TRANSFORMS_UNITY
+    [UpdateInGroup(typeof(TransformBakingSystemGroup), OrderFirst = true)]
+    partial class BakingOnlyEntityAuthoringBakingSystem
+    {
+    }
+#endif
 }
 

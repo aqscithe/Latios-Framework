@@ -13,6 +13,8 @@ namespace Latios.Myri.Authoring
         [Header("Playback")]
         [Tooltip("An audio clip which will be converted into a DOTS representation and played by this source")]
         public AudioClip clip;
+        [Tooltip("The compression codec to use for the clip, on top of subscene serialization compression")]
+        public Codec codec;
         [Tooltip("The raw volume applied to the audio source, before spatial falloff is applied")]
         public float volume = 1f;
         [Tooltip("Whether or not the source should play the clip in a loop")]
@@ -32,7 +34,7 @@ namespace Latios.Myri.Authoring
 
         [Header("Falloff")]
         public bool useFalloff = true;
-        [Tooltip("When the listener is within this distance to the source, no falloff attenuation is applied")]
+        [Tooltip("The distance to play the reference volume. When the listener is within this distance to the source, no falloff attenuation is applied")]
         public float innerRange = 5f;
         [Tooltip("When the listener is outside this distance to the source, no audio is heard")]
         public float outerRange = 25f;
@@ -71,7 +73,7 @@ namespace Latios.Myri.Authoring
                 }
             }
             else
-                m_handle = baker.RequestCreateBlobAsset(authoring.clip, authoring.voices);
+                m_handle = baker.RequestCreateBlobAsset(authoring.clip, authoring.codec, authoring.voices);
 
             if (!useRuntimeProceduralClip)
             {

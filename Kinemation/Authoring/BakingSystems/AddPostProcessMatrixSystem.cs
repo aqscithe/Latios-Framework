@@ -8,12 +8,14 @@ using Unity.Mathematics;
 
 using static Unity.Entities.SystemAPI;
 
+// Note: This system is only added to baking in QVVS Transforms.
+
 namespace Latios.Kinemation.Authoring.Systems
 {
     [RequireMatchingQueriesForUpdate]
     [WorldSystemFilter(WorldSystemFilterFlags.BakingSystem)]
     [UpdateInGroup(typeof(TransformBakingSystemGroup))]
-#if !LATIOS_TRANSFORMS_UNCACHED_QVVS && !LATIOS_TRANSFORMS_UNITY
+#if !LATIOS_TRANSFORMS_UNITY
     [UpdateAfter(typeof(Latios.Transforms.Authoring.Systems.TransformBakingSystem))]
 #endif
     [DisableAutoCreation]

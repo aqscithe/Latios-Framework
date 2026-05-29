@@ -108,42 +108,6 @@ namespace Latios
         /// <param name="readOnly">Whether the components should be read-only. If false, they will be read-write.</param>
         public ComponentBrokerBuilder With<T0, T1, T2, T3, T4>(bool readOnly = false) => With<T0, T1>(readOnly).With<T2, T3, T4>(readOnly);
 
-        // Todo: These only give us required components (which are kinda buggy anyways). We need something better, which would probably require source generation or reflection.
-        // /// <summary>
-        // /// Adds the component types required by the aspect to the builder, using the same read-only and read-write
-        // /// requirements the aspect specifies
-        // /// </summary>
-        // /// <typeparam name="T">The aspect type to add</typeparam>
-        // public ComponentBrokerBuilder WithAspect<T>() where T : unmanaged, IAspect, IAspectCreate<T>
-        // {
-        //     aspectCache.Clear();
-        //     default(T).AddComponentRequirementsTo(ref aspectCache);
-        //     foreach (var c in aspectCache)
-        //     {
-        //         With(c);
-        //     }
-        //     return this;
-        // }
-        // /// <summary>
-        // /// Adds the component types required by the aspects to the builder, using the same read-only and read-write
-        // /// requirements the aspects specify
-        // /// </summary>
-        // /// <typeparam name="T0">The first aspect type to add</typeparam>
-        // /// <typeparam name="T1">The second aspect type to add</typeparam>
-        // public ComponentBrokerBuilder WithAspect<T0, T1>() where T0 : unmanaged, IAspect, IAspectCreate<T0>
-        //     where T1 : unmanaged, IAspect, IAspectCreate<T1> =>
-        // WithAspect<T0>().WithAspect<T1>();
-        // /// <summary>
-        // /// Adds the component types required by the aspects to the builder, using the same read-only and read-write
-        // /// requirements the aspects specify
-        // /// </summary>
-        // /// <typeparam name="T0">The first aspect type to add</typeparam>
-        // /// <typeparam name="T1">The second aspect type to add</typeparam>
-        // /// <typeparam name="T2">The third aspect type to add</typeparam>
-        // public ComponentBrokerBuilder WithAspect<T0, T1, T2>() where T0 : unmanaged, IAspect, IAspectCreate<T0>
-        //     where T1 : unmanaged, IAspect, IAspectCreate<T1>
-        //     where T2 : unmanaged, IAspect, IAspectCreate<T2> =>
-        // WithAspect<T0>().WithAspect<T1>().WithAspect<T2>();
         /// <summary>
         /// Finalize and construct the ComponentBroker
         /// </summary>
@@ -217,6 +181,11 @@ namespace Latios
         /// Returns true if the entity exists
         /// </summary>
         public bool Exists(Entity entity) => esil.Exists(entity);
+
+        /// <summary>
+        /// Returns true if the entity exists and is not in a cleanup state
+        /// </summary>
+        public bool IsAlive(Entity entity) => esil.IsAlive(entity);
 
         /// <summary>
         /// Checks if the entity has the specific component type. The type does not necessarily need to be a type
@@ -616,14 +585,14 @@ namespace Latios
         /// <returns>A pointer to the component, or null if the component is not present</returns>
         public void* GetUnsafeComponentPtrRO(Entity entity, TypeIndex typeIndex)
         {
-            CheckTypeIndexIsInComponentList(typeIndex);
+            CheckTypeIndexIsInComponentList(typeIndex.Index);
             CheckTypeNotBuffer(typeIndex);
 
             if (typeIndex.IsSharedComponentType)
             {
                 fixed (DynamicSharedComponentTypeHandle* s0Ptr = &s0)
                 {
-                    ref var handle = ref s0Ptr[handleIndices[typeIndex].index];
+                    ref var handle = ref s0Ptr[handleIndices[typeIndex.Index].index];
                     void*   ptr    = default;
                     if (entity == currentEntity)
                     {
@@ -641,7 +610,7 @@ namespace Latios
             var                                typeSize = TypeManager.GetTypeInfo(typeIndex).TypeSize;
             fixed (DynamicComponentTypeHandle* c0Ptr    = &c0)
             {
-                ref var                    handle               = ref c0Ptr[handleIndices[typeIndex].index];
+                ref var                    handle               = ref c0Ptr[handleIndices[typeIndex.Index].index];
                 DynamicComponentTypeHandle forcedReadOnlyHandle = !handle.IsReadOnly ? handle.CopyToReadOnly() : default;
                 ref var                    handleToUse          = ref (handle.IsReadOnly ? ref handle : ref forcedReadOnlyHandle);
                 if (entity == currentEntity)
@@ -671,14 +640,14 @@ namespace Latios
         /// <returns>A pointer to the component, or null if the component is not present</returns>
         public void* GetUnsafeComponentPtrRW(Entity entity, TypeIndex typeIndex)
         {
-            CheckTypeIndexIsInComponentList(typeIndex);
+            CheckTypeIndexIsInComponentList(typeIndex.Index);
             CheckTypeNotBuffer(typeIndex);
             CheckTypeNotShared(typeIndex);
 
             var                                typeSize = TypeManager.GetTypeInfo(typeIndex).TypeSize;
             fixed (DynamicComponentTypeHandle* c0Ptr    = &c0)
             {
-                ref var handle = ref c0Ptr[handleIndices[typeIndex].index];
+                ref var handle = ref c0Ptr[handleIndices[typeIndex.Index].index];
                 if (entity == currentEntity)
                 {
                     var array = currentChunk.GetDynamicComponentDataArrayReinterpret<byte>(ref handle, typeSize);
@@ -707,14 +676,14 @@ namespace Latios
         /// <returns>A pointer to the component, or null if the component is not present</returns>
         public void* GetUnsafeComponentPtrROIgnoreParallelSafety(Entity entity, TypeIndex typeIndex)
         {
-            CheckTypeIndexIsInComponentList(typeIndex);
+            CheckTypeIndexIsInComponentList(typeIndex.Index);
             CheckTypeNotBuffer(typeIndex);
 
             if (typeIndex.IsSharedComponentType)
             {
                 fixed (DynamicSharedComponentTypeHandle* s0Ptr = &s0)
                 {
-                    ref var handle = ref s0Ptr[handleIndices[typeIndex].index];
+                    ref var handle = ref s0Ptr[handleIndices[typeIndex.Index].index];
                     void*   ptr    = default;
                     if (entity == currentEntity)
                     {
@@ -732,7 +701,7 @@ namespace Latios
             var                                typeSize = TypeManager.GetTypeInfo(typeIndex).TypeSize;
             fixed (DynamicComponentTypeHandle* c0Ptr    = &c0)
             {
-                ref var                    handle               = ref c0Ptr[handleIndices[typeIndex].index];
+                ref var                    handle               = ref c0Ptr[handleIndices[typeIndex.Index].index];
                 DynamicComponentTypeHandle forcedReadOnlyHandle = !handle.IsReadOnly ? handle.CopyToReadOnly() : default;
                 ref var                    handleToUse          = ref (handle.IsReadOnly ? ref handle : ref forcedReadOnlyHandle);
                 if (entity == currentEntity)
@@ -762,14 +731,14 @@ namespace Latios
         /// <returns>A pointer to the component, or null if the component is not present</returns>
         public void* GetUnsafeComponentPtrRWIgnoreParallelSafety(Entity entity, TypeIndex typeIndex)
         {
-            CheckTypeIndexIsInComponentList(typeIndex);
+            CheckTypeIndexIsInComponentList(typeIndex.Index);
             CheckTypeNotBuffer(typeIndex);
             CheckTypeNotShared(typeIndex);
 
             var                                typeSize = TypeManager.GetTypeInfo(typeIndex).TypeSize;
             fixed (DynamicComponentTypeHandle* c0Ptr    = &c0)
             {
-                ref var handle = ref c0Ptr[handleIndices[typeIndex].index];
+                ref var handle = ref c0Ptr[handleIndices[typeIndex.Index].index];
                 if (entity == currentEntity)
                 {
                     var array = currentChunk.GetDynamicComponentDataArrayReinterpret<byte>(ref handle, typeSize);
@@ -784,6 +753,67 @@ namespace Latios
                     if (array.Length == 0)
                         return null;
                     return (byte*)array.GetUnsafePtr() + typeSize * info.IndexInChunk;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Attempts to write the data at the specified address into the component of the specified type for the specified entity.
+        /// This method ignores parallel safety checks as if [NativeDisableParallelForRestriction] was used. This method is
+        /// commonly used for deserialization tasks.
+        /// </summary>
+        /// <param name="entity">The entity containing the component to write to</param>
+        /// <param name="typeIndex">The type index of the component to write to</param>
+        /// <param name="dataPtrToWrite">The component data to copy from</param>
+        /// <returns>True if the entity had the component and was able to write to it, false if it didn't and nothing happened</returns>
+        public bool TryWriteComponentIgnoreParallelSafety(Entity entity, TypeIndex typeIndex, void* dataPtrToWrite)
+        {
+            var dst = GetUnsafeComponentPtrRWIgnoreParallelSafety(entity, typeIndex);
+            if (dst == null)
+                return false;
+            var typeSize = TypeManager.GetTypeInfo(typeIndex).TypeSize;
+            UnsafeUtility.MemCpy(dst, dataPtrToWrite, typeSize);
+            return true;
+        }
+
+        /// <summary>
+        /// Attempts to replace the dynamic buffer of the specified type for the specified entity with the array of elements provided.
+        /// This method ignores parallel safety checks as if [NativeDisableParallelForRestriction] was used. This method is commonly
+        /// used for deserialization tasks.
+        /// </summary>
+        /// <param name="entity">The entity containing the DynamicBuffer to replace</param>
+        /// <param name="typeIndex">The type of IBufferElementData to replace</param>
+        /// <param name="dataArrayPtrToWrite">A pointer to an array of elements that should be written to the DynamicBuffer</param>
+        /// <param name="elementCountToWrite">The number of elements (not necessarily bytes) that should be written to the DynamicBuffer
+        /// The DynamicBuffer is resized to this size.</param>
+        /// <returns>True if the entity had the DyanmicBuffer and was able to replace its contents, false if it didn't and nothing happened</returns>
+        public bool TryWriteBufferIgnoreParallelSafety(Entity entity, TypeIndex typeIndex, void* dataArrayPtrToWrite, int elementCountToWrite)
+        {
+            CheckTypeIndexIsInComponentList(typeIndex.Index);
+            CheckTypeIsBuffer(typeIndex);
+            fixed (DynamicComponentTypeHandle* c0Ptr = &c0)
+            {
+                ref var handle = ref c0Ptr[handleIndices[typeIndex.Index].index];
+                if (entity == currentEntity)
+                {
+                    var access = currentChunk.GetUntypedBufferAccessor(ref handle);
+                    if (access.Length == 0)
+                        return false;
+                    access.ResizeUninitialized(currentIndexInChunk, elementCountToWrite);
+                    var dst = access.GetUnsafePtr(currentIndexInChunk);
+                    UnsafeUtility.MemCpy(dst, dataArrayPtrToWrite, elementCountToWrite * access.ElementSize);
+                    return true;
+                }
+                else
+                {
+                    var info   = esil[entity];
+                    var access = info.Chunk.GetUntypedBufferAccessor(ref handle);
+                    if (access.Length == 0)
+                        return false;
+                    access.ResizeUninitialized(info.IndexInChunk, elementCountToWrite);
+                    var dst = access.GetUnsafePtr(info.IndexInChunk);
+                    UnsafeUtility.MemCpy(dst, dataArrayPtrToWrite, elementCountToWrite * access.ElementSize);
+                    return true;
                 }
             }
         }
@@ -1336,10 +1366,10 @@ namespace Latios
         /// <returns>A pointer to the first component instance of the specified type in the chunk</returns>
         public static void* GetDynamicComponentDataPtrRO(in this ArchetypeChunk chunk, ref ComponentBroker broker, TypeIndex typeIndex)
         {
-            broker.CheckTypeIndexIsInComponentList(typeIndex);
+            broker.CheckTypeIndexIsInComponentList(typeIndex.Index);
             broker.CheckTypeNotBuffer(typeIndex);
             broker.CheckTypeNotShared(typeIndex);
-            var                                typeSize = TypeManager.GetTypeInfo(typeIndex).SizeInChunk;
+            var                                typeSize = TypeManager.GetTypeInfo(typeIndex.Index).SizeInChunk;
             fixed (DynamicComponentTypeHandle* c0Ptr    = &broker.c0)
             {
                 ref var handle = ref c0Ptr[broker.handleIndices[typeIndex].index];
@@ -1360,13 +1390,13 @@ namespace Latios
         /// <returns>A pointer to the first component instance of the specified type in the chunk</returns>
         public static void* GetDynamicComponentDataPtrRW(in this ArchetypeChunk chunk, ref ComponentBroker broker, TypeIndex typeIndex)
         {
-            broker.CheckTypeIndexIsInComponentList(typeIndex);
+            broker.CheckTypeIndexIsInComponentList(typeIndex.Index);
             broker.CheckTypeNotBuffer(typeIndex);
             broker.CheckTypeNotShared(typeIndex);
             var                                typeSize = TypeManager.GetTypeInfo(typeIndex).SizeInChunk;
             fixed (DynamicComponentTypeHandle* c0Ptr    = &broker.c0)
             {
-                ref var handle = ref c0Ptr[broker.handleIndices[typeIndex].index];
+                ref var handle = ref c0Ptr[broker.handleIndices[typeIndex.Index].index];
                 return chunk.GetDynamicComponentDataArrayReinterpret<byte>(ref handle, typeSize).GetUnsafePtr();
             }
         }

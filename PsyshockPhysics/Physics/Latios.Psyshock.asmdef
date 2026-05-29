@@ -3,11 +3,11 @@
     "rootNamespace": "Latios.Psyshock",
     "references": [
         "Latios.Core",
+        "Latios.Calci",
         "Latios.Transforms",
         "Unity.Entities",
         "Unity.Collections",
         "Unity.Mathematics",
-        "Unity.Jobs",
         "Unity.Entities.Hybrid",
         "Unity.Burst"
     ],
@@ -18,6 +18,12 @@
     "precompiledReferences": [],
     "autoReferenced": true,
     "defineConstraints": [],
-    "versionDefines": [],
+    "versionDefines": [
+		{
+            "name": "com.unity.entities",
+            "expression": "1.4.0",
+            "define": "ENTITIES_1_4"
+        }
+	],
     "noEngineReferences": false
 }

@@ -1,3 +1,4 @@
+using Latios.Calci;
 using Unity.Burst;
 using Unity.Mathematics;
 
@@ -65,7 +66,7 @@ namespace Latios.Psyshock
                     // all inside, hit plane
                     result.hitpoint    = projectedPoint;
                     result.distance    = math.abs(projectionDot);
-                    result.normal      = math.select(planeNormal, -planeNormal, math.dot(result.hitpoint - point, planeNormal) < 0);
+                    result.normal      = math.select(planeNormal, -planeNormal, math.dot(point - result.hitpoint, planeNormal) < 0);
                     result.featureCode = 0x8000;
                     break;
                 }
@@ -257,7 +258,7 @@ namespace Latios.Psyshock
                 }
             }
 
-            result.normal      = math.select(planeNormal, -planeNormal, math.dot(result.hitpoint - point, planeNormal) < 0);
+            result.normal      = math.select(planeNormal, -planeNormal, math.dot(point - result.hitpoint, planeNormal) < 0);
             result.featureCode = 0;  // Unusable for quads
             return result.distance <= maxDistance;
         }
@@ -587,6 +588,28 @@ namespace Latios.Psyshock
                     return 0x8000;
                 }
                 default: return a;  // Max is 3.
+            }
+        }
+
+        internal static void EdgeEndpointsFromEdgeFeatureCode(in TriangleCollider triangle, ushort featureCode, out float3 endpointA, out float3 endpointB)
+        {
+            switch (featureCode & 0x3)
+            {
+                case 0:
+                    endpointA = triangle.pointA;
+                    endpointB = triangle.pointB;
+                    break;
+                case 1:
+                    endpointA = triangle.pointB;
+                    endpointB = triangle.pointC;
+                    break;
+                case 2:
+                    endpointA = triangle.pointC;
+                    endpointB = triangle.pointA;
+                    break;
+                default:
+                    endpointA = endpointB = triangle.pointA;
+                    break;
             }
         }
 

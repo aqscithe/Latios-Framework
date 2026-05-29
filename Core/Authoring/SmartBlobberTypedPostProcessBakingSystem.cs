@@ -40,7 +40,6 @@ namespace Latios.Authoring.Systems
         {
             // Step 1: Update handles
             var blobAssetStore = m_bakingSystemReference.BlobAssetStore;
-            var typeHash       = blobAssetStore.GetTypeHashForBurst<TBlobType>();
 
             m_resultHandle.Update(this);
             m_trackingDataHandle.Update(this);
@@ -70,7 +69,6 @@ namespace Latios.Authoring.Systems
             Dependency = new SmartBlobberTools<TBlobType>.DeduplicateBlobsWithBlobAssetStoreJob
             {
                 blobAssetStore     = blobAssetStore,
-                burstTypeHash      = typeHash,
                 resultHandle       = m_resultHandle,
                 trackingDataHandle = m_trackingDataHandle,
             }.Schedule(m_query, Dependency);
@@ -220,7 +218,7 @@ namespace Latios.Authoring
 
                     if (disposedBlobs.Contains(td.hash))
                     {
-                        if (!blobAssetStore.TryGetBlobAssetWithBurstHash<TBlobType>(td.hash, burstTypeHash, out var storedBlob))
+                        if (!blobAssetStore.TryGet<TBlobType>(td.hash, out var storedBlob))
                         {
                             UnityEngine.Debug.LogError($"Blob hash {td.hash} was lost in BlobAssetStore. This is likely a Unity bug. Please report!");
                             blobs[i] = default;
@@ -232,7 +230,7 @@ namespace Latios.Authoring
                     {
                         var blob       = blobs[i].Reinterpret<TBlobType>();
                         var backupBlob = blob;
-                        if (!blobAssetStore.TryAddBlobAssetWithBurstHash(td.hash, burstTypeHash, ref blob) && backupBlob != blob)
+                        if (!blobAssetStore.TryAdd(td.hash, ref blob) && backupBlob != blob)
                         {
                             blobs[i] = UnsafeUntypedBlobAssetReference.Create(blob);
                             disposedBlobs.Add(td.hash);

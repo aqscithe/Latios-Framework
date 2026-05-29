@@ -25,6 +25,8 @@ namespace Latios.Unsafe
             set => s_settings.Data.defaultBlockSize = value;
         }
 
+        public bool isCreated => m_statePtr != null;
+
         public static ThreadStackAllocator GetAllocator()
         {
             return s_states.Data[JobsUtility.ThreadIndex]->CreateAllocator();
@@ -54,6 +56,8 @@ namespace Latios.Unsafe
             CheckAllocatorIsValid();
             return m_statePtr->CreateAllocator();
         }
+
+        internal void LogAllocator() => m_statePtr->LogAllocator(this);
         #endregion
 
         #region Implementation
@@ -89,6 +93,7 @@ namespace Latios.Unsafe
             {
                 CheckForDepthLeaks(m_allocatorDepth + 1);
                 m_allocatorDepth++;
+                //UnityEngine.Debug.Log($"Allocated depth {m_allocatorDepth} for ptr {(ulong)m_selfPtr} on thread {JobsUtility.ThreadIndex}");
                 return new ThreadStackAllocator
                 {
                     m_depth                = m_allocatorDepth,
@@ -165,6 +170,7 @@ namespace Latios.Unsafe
 
             public void DisposeAllocator(ThreadStackAllocator allocator)
             {
+                //UnityEngine.Debug.Log($"Disposed depth {allocator.m_depth} while current depth is {m_allocatorDepth} for ptr {(ulong)m_selfPtr} on thread {JobsUtility.ThreadIndex}");
                 CheckForDepthLeaks(allocator.m_depth, m_allocatorDepth);
                 m_allocatorDepth     = allocator.m_depth - 1;
                 m_allocations.Length = allocator.m_firstAllocationIndex;
@@ -186,6 +192,12 @@ namespace Latios.Unsafe
                 }
                 state->m_blocks.Dispose();
                 state->m_allocations.Dispose();
+            }
+
+            public void LogAllocator(ThreadStackAllocator allocator)
+            {
+                UnityEngine.Debug.Log(
+                    $"Logging allocator depth {allocator.m_depth} while current depth is {m_allocatorDepth} for ptr {(ulong)m_selfPtr} on thread {JobsUtility.ThreadIndex}");
             }
         }
 

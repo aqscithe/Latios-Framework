@@ -1,5 +1,5 @@
 using System;
-using Latios.Kinemation.InternalSourceGen;
+using System.Collections.Generic;
 using Latios.Psyshock;
 using Unity.Collections;
 using Unity.Entities;
@@ -11,18 +11,6 @@ using UnityEngine.Rendering;
 namespace Latios.Kinemation
 {
     #region Meshes
-    namespace InternalSourceGen
-    {
-        public struct SkeletonDependent : ICleanupComponentData
-        {
-            public EntityWith<SkeletonRootTag>                  root;
-            public BlobAssetReference<MeshBindingPathsBlob>     meshBindingBlob;
-            public BlobAssetReference<SkeletonBindingPathsBlob> skeletonBindingBlob;
-            public int                                          boneOffsetEntryIndex;
-            public int                                          indexInDependentSkinnedMeshesBuffer;
-        }
-    }
-
     internal struct BoundMesh : ICleanupComponentData
     {
         public BlobAssetReference<MeshDeformDataBlob> meshBlob;
@@ -30,9 +18,6 @@ namespace Latios.Kinemation
     }
 
     internal struct BoundMeshNeedsReinit : IComponentData { }
-
-    [WriteGroup(typeof(ChunkPerCameraCullingMask))]
-    internal struct ChunkSkinningCullingTag : IComponentData { }
 
     [MaterialProperty("_ComputeMeshIndex")]
     internal struct LegacyComputeDeformShaderIndex : IComponentData
@@ -70,7 +55,6 @@ namespace Latios.Kinemation
         // Legacy are aliases/combinations of these
     }
 
-    [WriteGroup(typeof(ChunkPerCameraCullingMask))]
     internal struct ChunkCopyDeformTag : IComponentData { }
 
     internal struct TrackedUniqueMesh : ICleanupComponentData
@@ -80,26 +64,10 @@ namespace Latios.Kinemation
     #endregion
 
     #region Skeletons
-    namespace InternalSourceGen
+    internal struct SkeletonWorldBoundsOffsetsFromPosition : IComponentData
     {
-        // This is system state to prevent copies on instantiate
-        [InternalBufferCapacity(1)]
-        public struct DependentSkinnedMesh : ICleanupBufferElementData
-        {
-            public EntityWith<SkeletonDependent> skinnedMesh;
-            // Todo: Store entry indices instead?
-            public uint  meshVerticesStart;
-            public uint  meshWeightsStart;
-            public uint  meshBindPosesStart;
-            public uint  boneOffsetsCount;
-            public uint  boneOffsetsStart;
-            public float meshRadialOffset;
-        }
-    }
-
-    internal struct SkeletonBoundsOffsetFromMeshes : IComponentData
-    {
-        public float radialBoundsInWorldSpace;
+        public float3 minOffset;
+        public float3 maxOffset;
     }
 
     // Exposed skeletons
@@ -123,32 +91,17 @@ namespace Latios.Kinemation
         public Aabb bounds;
     }
 
-    internal struct ChunkBoneWorldBounds : IComponentData
-    {
-        public AABB chunkBounds;
-    }
-
     // Optimized skeletons
 
     // There's currently no other system state for optimized skeletons, so we need something
     // to track conversions between skeleton types.
     internal struct OptimizedSkeletonTag : ICleanupComponentData { }
 
-    internal struct OptimizedSkeletonWorldBounds : IComponentData
-    {
-        public AABB bounds;
-    }
-
     // The length of this should be 0 when no meshes are bound.
     [InternalBufferCapacity(0)]
     internal struct OptimizedBoneBounds : IBufferElementData
     {
         public float radialOffsetInBoneSpace;
-    }
-
-    internal struct ChunkOptimizedSkeletonWorldBounds : IComponentData
-    {
-        public AABB chunkBounds;
     }
     #endregion
 
@@ -354,20 +307,6 @@ namespace Latios.Kinemation
         }
     }
 
-    internal partial struct PackedCullingSplits : ICollectionComponent
-    {
-        public NativeReference<CullingSplits> packedSplits;
-
-        public JobHandle TryDispose(JobHandle inputDeps)
-        {
-            // The collections inside packedSplits is managed by a RewindableAllocator,
-            // but the NativeReference is allocated persistently.
-            if (packedSplits.IsCreated)
-                return packedSplits.Dispose(inputDeps);
-            return inputDeps;
-        }
-    }
-
     internal struct MaxRequiredDeformData : IComponentData
     {
         public uint maxRequiredBoneTransformsForVertexSkinning;
@@ -378,39 +317,19 @@ namespace Latios.Kinemation
     {
         public NativeList<ValueBlitDescriptor> valueBlits;
 
-        public int                        hybridRenderedChunkCount;
+        public int                        renderersChunkCount;
         public NativeArray<ChunkProperty> chunkProperties;
+        public ThreadedBatchContext       threadedBatchContext;
+        public NativeParallelHashSet<int> existingBatchIndices;
+        public long                       requiredPersistentInstanceDataSize;
+
+        public UnityEngine.GraphicsBufferHandle gpuPersistentInstanceBufferHandle;
 
         public JobHandle TryDispose(JobHandle inputDeps)
         {
             // We don't own this data
             return inputDeps;
         }
-    }
-
-    internal partial struct ExposedSkeletonBoundsArrays : ICollectionComponent
-    {
-        public NativeList<AABB>  allAabbs;
-        public NativeList<AABB>  batchedAabbs;
-        public NativeList<AABB>  allAabbsPreOffset;
-        public NativeList<float> meshOffsets;
-        public const int         kCountPerBatch = 32;  // Todo: Is there a better size?
-
-        public JobHandle TryDispose(JobHandle inputDeps)
-        {
-            if (!allAabbs.IsCreated)
-                return inputDeps;
-
-            inputDeps = allAabbs.Dispose(inputDeps);
-            inputDeps = allAabbsPreOffset.Dispose(inputDeps);
-            inputDeps = meshOffsets.Dispose(inputDeps);
-            return batchedAabbs.Dispose(inputDeps);
-        }
-    }
-
-    internal struct BrgAabb : IComponentData
-    {
-        public Aabb aabb;
     }
 
     // Int because this will grow in the future and it would be great to not have a regression
@@ -445,35 +364,11 @@ namespace Latios.Kinemation
         public JobHandle TryDispose(JobHandle inputDeps) => inputDeps;
     }
 
-    internal partial struct LODCrossfadePtrMap : ICollectionComponent
-    {
-        public unsafe struct CrossfadePtr { public LodCrossfade* ptr; }
-        public struct ChunkIdentifier : IEquatable<ChunkIdentifier>
-        {
-            public uint batchID;
-            public int  batchStartIndex;
-
-            bool IEquatable<ChunkIdentifier>.Equals(ChunkIdentifier other)
-            {
-                return batchID.Equals(other.batchID) && batchStartIndex.Equals(other.batchStartIndex);
-            }
-
-            public override int GetHashCode() => new int2(math.asint(batchID), batchStartIndex).GetHashCode();
-        }
-
-        public NativeHashMap<ChunkIdentifier, CrossfadePtr> chunkIdentifierToPtrMap;
-
-        // The data is owned by a world or system rewindable allocator.
-        public JobHandle TryDispose(JobHandle inputDeps) => inputDeps;
-    }
-
     internal partial struct UniqueMeshPool : ICollectionComponent
     {
         public NativeList<UnityObjectRef<UnityEngine.Mesh> > unusedMeshes;
         public NativeList<UnityObjectRef<UnityEngine.Mesh> > allMeshes;
         // int = BatchMeshID as int, which is MaterialMeshInfo.Mesh. MaterialMeshInfo.MeshID asserts when using ranges with a mesh override.
-        public NativeHashSet<int>                                    invalidMeshesToCull;
-        public NativeHashSet<int>                                    meshesPrevalidatedThisFrame;
         public NativeHashMap<UnityObjectRef<UnityEngine.Mesh>, int>  meshToIdMap;
         public NativeHashMap<int, UnityObjectRef<UnityEngine.Mesh> > idToMeshMap;
 
@@ -485,14 +380,27 @@ namespace Latios.Kinemation
                 GraphicsUnmanaged.DestroyMeshes(allMeshes.AsArray());
                 unusedMeshes.Dispose();
                 allMeshes.Dispose();
-                invalidMeshesToCull.Dispose();
-                meshesPrevalidatedThisFrame.Dispose();
                 meshToIdMap.Dispose();
                 idToMeshMap.Dispose();
                 return default;
             }
             return inputDeps;
         }
+    }
+
+    [InternalBufferCapacity(0)]
+    internal struct MipMapStreamingAssignment : IBufferElementData
+    {
+        public UnityObjectRef<UnityEngine.Texture2D> texture;
+        public int                                   level;
+    }
+
+    [InternalBufferCapacity(0)]
+    internal struct MipMapCameraParameters : IBufferElementData
+    {
+        public float3 position;
+        public float  cameraFactor;
+        public bool   isPerspective;
     }
     #endregion
 }

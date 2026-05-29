@@ -47,30 +47,30 @@ namespace Latios.Psyshock
                 public void Run()
                 {
                     SetScheduleMode(ScheduleMode.Single);
-                    this.Run(1);
+                    this.RunByRef(1);
                 }
 
                 public JobHandle ScheduleSingle(JobHandle inputDeps)
                 {
                     SetScheduleMode(ScheduleMode.Single);
-                    return this.Schedule(1, inputDeps);
+                    return this.ScheduleByRef(1, inputDeps);
                 }
 
                 public JobHandle ScheduleParallel(JobHandle inputDeps, ScheduleMode scheduleMode)
                 {
                     SetScheduleMode(scheduleMode);
                     if (scheduleMode == ScheduleMode.ParallelPart1 || scheduleMode == ScheduleMode.ParallelPart1AllowEntityAliasing)
-                        return this.ScheduleParallel(IndexStrategies.Part1Count(layer.cellCount), 1, inputDeps);
+                        return this.ScheduleParallelByRef(IndexStrategies.Part1Count(layer.cellCount), 1, inputDeps);
                     if (scheduleMode == ScheduleMode.ParallelPart2)
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
-                        return this.ScheduleParallel(2, 1, inputDeps);
+                        return this.ScheduleParallelByRef(2, 1, inputDeps);
 #else
-                        return this.ScheduleParallel(1, 1, inputDeps);
+                        return this.ScheduleParallelByRef(1, 1, inputDeps);
 #endif
                     if (scheduleMode == ScheduleMode.ParallelPart2AllowEntityAliasing)
-                        return this.ScheduleParallel(1, 1, inputDeps);
+                        return this.ScheduleParallelByRef(1, 1, inputDeps);
                     if (scheduleMode == ScheduleMode.ParallelUnsafe)
-                        return this.ScheduleParallel(IndexStrategies.JobIndicesFromSingleLayerFindPairs(layer.cellCount), 1, inputDeps);
+                        return this.ScheduleParallelByRef(IndexStrategies.JobIndicesFromSingleLayerFindPairs(layer.cellCount), 1, inputDeps);
                     return inputDeps;
                 }
 
@@ -363,24 +363,24 @@ namespace Latios.Psyshock
                 public void Run()
                 {
                     SetScheduleMode(ScheduleMode.Single);
-                    this.Run(1);
+                    this.RunByRef(1);
                 }
 
                 public JobHandle ScheduleSingle(JobHandle inputDeps)
                 {
                     SetScheduleMode(ScheduleMode.Single);
-                    return this.Schedule(1, inputDeps);
+                    return this.ScheduleByRef(1, inputDeps);
                 }
 
                 public JobHandle ScheduleParallel(JobHandle inputDeps, ScheduleMode scheduleMode)
                 {
                     SetScheduleMode(scheduleMode);
                     if (scheduleMode == ScheduleMode.ParallelPart1)
-                        return this.ScheduleParallel(IndexStrategies.Part1Count(world.layer.cellCount), 1, inputDeps);
+                        return this.ScheduleParallelByRef(IndexStrategies.Part1Count(world.layer.cellCount), 1, inputDeps);
                     if (scheduleMode == ScheduleMode.ParallelPart2)
-                        return this.ScheduleParallel(1, 1, inputDeps);
+                        return this.ScheduleParallelByRef(1, 1, inputDeps);
                     if (scheduleMode == ScheduleMode.ParallelUnsafe)
-                        return this.ScheduleParallel(IndexStrategies.JobIndicesFromSingleLayerFindPairs(world.layer.cellCount), 1, inputDeps);
+                        return this.ScheduleParallelByRef(IndexStrategies.JobIndicesFromSingleLayerFindPairs(world.layer.cellCount), 1, inputDeps);
                     return inputDeps;
                 }
 
@@ -750,7 +750,7 @@ namespace Latios.Psyshock
                 [ReadOnly] CollisionLayer      layerA;
                 [ReadOnly] CollisionLayer      layerB;
                 T                              processor;
-                UnsafeIndexedBlockList         blockList;
+                UnsafeIndexedBlockList<int2>   blockList;
                 ScheduleMode                   m_scheduleMode;
                 Unity.Profiling.ProfilerMarker modeAndTMarker;
 
@@ -768,13 +768,13 @@ namespace Latios.Psyshock
                 public void Run()
                 {
                     SetScheduleMode(ScheduleMode.Single);
-                    this.Run(1);
+                    this.RunByRef(1);
                 }
 
                 public JobHandle ScheduleSingle(JobHandle inputDeps)
                 {
                     SetScheduleMode(ScheduleMode.Single);
-                    return this.Schedule(1, inputDeps);
+                    return this.ScheduleByRef(1, inputDeps);
                 }
 
                 public JobHandle ScheduleParallel(JobHandle inputDeps, ScheduleMode scheduleMode)
@@ -786,22 +786,22 @@ namespace Latios.Psyshock
 
                     if (scheduleMode == ScheduleMode.ParallelPart1)
                     {
-                        return this.ScheduleParallel(part1Count, 1, inputDeps);
+                        return this.ScheduleParallelByRef(part1Count, 1, inputDeps);
                     }
                     if (scheduleMode == ScheduleMode.ParallelPart2 && allowEntityAliasing)
-                        return this.ScheduleParallel(2, 1, inputDeps);
+                        return this.ScheduleParallelByRef(2, 1, inputDeps);
                     if (scheduleMode == ScheduleMode.ParallelPart2)
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
-                        return this.ScheduleParallel(3, 1, inputDeps);
+                        return this.ScheduleParallelByRef(3, 1, inputDeps);
 #else
-                        return this.ScheduleParallel(2, 1, inputDeps);
+                        return this.ScheduleParallelByRef(2, 1, inputDeps);
 #endif
                     if (scheduleMode == ScheduleMode.ParallelByA)
                     {
                         if (useCrossCache)
                         {
                             var crossCount = IndexStrategies.ParallelByACrossCount(layerA.cellCount);
-                            blockList      = new UnsafeIndexedBlockList(8, 1024, crossCount, Allocator.TempJob);
+                            blockList      = new UnsafeIndexedBlockList<int2>(1024, crossCount, Allocator.TempJob);
                             inputDeps      = new FindPairsParallelByACrossCacheJob { layerA = layerA, layerB = layerB, cache = blockList }.ScheduleParallel(crossCount,
                                                                                                                                                             1,
                                                                                                                                                             inputDeps);
@@ -809,19 +809,19 @@ namespace Latios.Psyshock
                         }
 
                         if (allowEntityAliasing)
-                            inputDeps = this.ScheduleParallel(part1Count, 1, inputDeps);
+                            inputDeps = this.ScheduleParallelByRef(part1Count, 1, inputDeps);
                         else
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
-                            inputDeps = this.ScheduleParallel(part1Count + 1, 1, inputDeps);
+                            inputDeps = this.ScheduleParallelByRef(part1Count + 1, 1, inputDeps);
 #else
-                            inputDeps = this.ScheduleParallel(part1Count, 1, inputDeps);
+                            inputDeps = this.ScheduleParallelByRef(part1Count, 1, inputDeps);
 #endif
                         if (useCrossCache)
                             return blockList.Dispose(inputDeps);
                         return inputDeps;
                     }
                     if (scheduleMode == ScheduleMode.ParallelUnsafe)
-                        return this.ScheduleParallel(IndexStrategies.JobIndicesFromDualLayerFindPairs(layerA.cellCount), 1, inputDeps);
+                        return this.ScheduleParallelByRef(IndexStrategies.JobIndicesFromDualLayerFindPairs(layerA.cellCount), 1, inputDeps);
                     return inputDeps;
                 }
 
@@ -1358,13 +1358,13 @@ namespace Latios.Psyshock
                 public void Run()
                 {
                     SetScheduleMode(ScheduleMode.Single);
-                    this.Run(1);
+                    this.RunByRef(1);
                 }
 
                 public JobHandle ScheduleSingle(JobHandle inputDeps)
                 {
                     SetScheduleMode(ScheduleMode.Single);
-                    return this.Schedule(1, inputDeps);
+                    return this.ScheduleByRef(1, inputDeps);
                 }
 
                 public JobHandle ScheduleParallel(JobHandle inputDeps, ScheduleMode scheduleMode)
@@ -1376,22 +1376,22 @@ namespace Latios.Psyshock
 
                     if (scheduleMode == ScheduleMode.ParallelPart1)
                     {
-                        return this.ScheduleParallel(part1Count, 1, inputDeps);
+                        return this.ScheduleParallelByRef(part1Count, 1, inputDeps);
                     }
                     if (scheduleMode == ScheduleMode.ParallelPart2 && allowEntityAliasing)
-                        return this.ScheduleParallel(2, 1, inputDeps);
+                        return this.ScheduleParallelByRef(2, 1, inputDeps);
                     if (scheduleMode == ScheduleMode.ParallelPart2)
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
-                        return this.ScheduleParallel(3, 1, inputDeps);
+                        return this.ScheduleParallelByRef(3, 1, inputDeps);
 #else
-                        return this.ScheduleParallel(2, 1, inputDeps);
+                        return this.ScheduleParallelByRef(2, 1, inputDeps);
 #endif
                     if (scheduleMode == ScheduleMode.ParallelByA)
                     {
-                        return this.ScheduleParallel(part1Count, 1, inputDeps);
+                        return this.ScheduleParallelByRef(part1Count, 1, inputDeps);
                     }
                     if (scheduleMode == ScheduleMode.ParallelUnsafe)
-                        return this.ScheduleParallel(IndexStrategies.JobIndicesFromDualLayerFindPairs(worldA.layer.cellCount), 1, inputDeps);
+                        return this.ScheduleParallelByRef(IndexStrategies.JobIndicesFromDualLayerFindPairs(worldA.layer.cellCount), 1, inputDeps);
                     return inputDeps;
                 }
 
@@ -1906,9 +1906,9 @@ namespace Latios.Psyshock
     [BurstCompile]
     internal struct FindPairsParallelByACrossCacheJob : IJobFor
     {
-        [ReadOnly] public CollisionLayer layerA;
-        [ReadOnly] public CollisionLayer layerB;
-        public UnsafeIndexedBlockList    cache;
+        [ReadOnly] public CollisionLayer    layerA;
+        [ReadOnly] public CollisionLayer    layerB;
+        public UnsafeIndexedBlockList<int2> cache;
 
         public void Execute(int index)
         {
@@ -1920,8 +1920,8 @@ namespace Latios.Psyshock
 
         struct Cacher : IFindPairsProcessor
         {
-            public UnsafeIndexedBlockList cache;
-            public int                    writeIndex;
+            public UnsafeIndexedBlockList<int2> cache;
+            public int                          writeIndex;
 
             public void Execute(in FindPairsResult result)
             {

@@ -36,29 +36,6 @@ namespace Latios.Kinemation
     }
 
     /// <summary>
-    /// A mask which specifies if this skeleton is visible for the current
-    /// camera culling pass
-    /// Usage: Typically Read Only
-    /// </summary>
-    public struct ChunkPerCameraSkeletonCullingMask : IComponentData
-    {
-        public BitField64 lower;
-        public BitField64 upper;
-    }
-
-    /// <summary>
-    /// A mask which specifies the visible splits for this skeleton in the
-    /// current shadow-casting light culling pass
-    /// Usage: Only write to this if performing custom skeleton LODing logic for shadows.
-    /// </summary>
-    [StructLayout(LayoutKind.Explicit)]
-    public unsafe struct ChunkPerCameraSkeletonCullingSplitsMask : IComponentData
-    {
-        [FieldOffset(0)] public fixed byte  splitMasks[128];
-        [FieldOffset(0)] public fixed ulong ulongMasks[16];  // Ensures 8 byte alignment which is helpful (16 would be better)
-    }
-
-    /// <summary>
     /// A blob asset which contains bone path "strings" in reverse path order,
     /// that is from leaf bone to root bone, for each bone in the skeleton.
     /// </summary>
@@ -130,6 +107,41 @@ namespace Latios.Kinemation
         public ReadOnlySpan<ulong> this[int maskIndex] => masks[maskIndex].AsSpan();
     }
 
+    /// <summary>
+    /// A buffer used to track skinned meshes bound to this skeleton.
+    /// Usage: ReadOnly, do not modify in any way.
+    /// </summary>
+    [InternalBufferCapacity(1)]
+    public struct DependentSkinnedMesh : ICleanupBufferElementData
+    {
+        /// <summary>
+        /// The skinned mesh entity bound to this skeleton
+        /// </summary>
+        public EntityWith<SkeletonDependent> skinnedMesh;
+        // Todo: Store entry indices instead?
+        /// <summary>
+        /// The index of the first vertex in the global undeformed mesh vertices buffer.
+        /// The buffer can be obtained via GraphicsBufferBroker.GetMeshVerticesBuffer().
+        /// The buffer is bound to "_latiosDeformBuffer"
+        /// </summary>
+        public uint meshVerticesStart;
+        /// <summary>
+        /// The index of the first bone weight in the global bone weights buffer.
+        /// </summary>
+        public uint meshWeightsStart;
+        /// <summary>
+        /// The index of the first bindpose of the mesh in the global bindposes buffer.
+        /// </summary>
+        public uint meshBindPosesStart;
+        /// <summary>
+        /// The number of bone influences the mesh uses
+        /// </summary>
+        public uint boneOffsetsCount;
+        /// <summary>
+        /// The index of the first bone offset, remapping a mesh bone influence index to a skeleton bone index.
+        /// </summary>
+        public uint boneOffsetsStart;
+    }
     #endregion
     #region Exposed skeleton
 
@@ -165,9 +177,9 @@ namespace Latios.Kinemation
     [InternalBufferCapacity(0)]
     public struct BoneReference : IBufferElementData
     {
-#if !LATIOS_TRANSFORMS_UNCACHED_QVVS && !LATIOS_TRANSFORMS_UNITY
+#if !LATIOS_TRANSFORMS_UNITY
         public EntityWith<WorldTransform> bone;
-#elif !LATIOS_TRANSFORMS_UNCACHED_QVVS && LATIOS_TRANSFORMS_UNITY
+#elif LATIOS_TRANSFORMS_UNITY
         public EntityWith<LocalToWorld> bone;
 #endif
     }

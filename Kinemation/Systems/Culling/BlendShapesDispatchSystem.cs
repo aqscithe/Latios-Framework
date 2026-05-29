@@ -52,7 +52,18 @@ namespace Latios.Kinemation.Systems
         }
 
         [BurstCompile]
-        public void OnUpdate(ref SystemState state) => m_data.DoUpdate(ref state, ref this);
+        public void OnUpdate(ref SystemState state)
+        {
+            var dispatchData = latiosWorld.worldBlackboardEntity.GetComponentData<DispatchContext>();
+            if (dispatchData.isCustomGraphicsDispatch)
+            {
+                var features = latiosWorld.worldBlackboardEntity.GetComponentData<EnableUpdatingInCustomGraphics>();
+                if (!features.blendShapes)
+                    return;
+            }
+
+            m_data.DoUpdate(ref state, ref this);
+        }
 
         public CollectState Collect(ref SystemState state)
         {
@@ -429,7 +440,7 @@ namespace Latios.Kinemation.Systems
                     }
                 }
 
-                for (int i = 0; i < (int)payload.nonzeroWeightsCount; i++)
+                for (int i = 0; i < (int)payload.nonzeroWeightsCount;)
                 {
                     uint runCount = 1;
                     for (int j = i + 1; j < (int)payload.nonzeroWeightsCount; j++)

@@ -1,0 +1,27 @@
+{
+    "name": "Latios.Calci",
+    "rootNamespace": "Latios.Calci",
+    "references": [
+        "Latios.Core",
+        "Latios.Transforms",
+        "Unity.Burst",
+        "Unity.Collections",
+        "Unity.Entities",
+        "Unity.Mathematics"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": true,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [
+        {
+            "name": "com.unity.entities",
+            "expression": "1.4.0",
+            "define": "ENTITIES_1_4"
+        }
+    ],
+    "noEngineReferences": false
+}

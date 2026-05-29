@@ -27,7 +27,7 @@ namespace Latios.LifeFX.Systems
         NativeList<Entity>        m_trackedEntities;
         NativeList<int>           m_freeList;
 
-        WorldTransformReadOnlyTypeHandle m_worldTransformHandle;
+        WorldTransformReadOnlyAspect.TypeHandle m_worldTransformHandle;
 
         [BurstCompile]
         public void OnCreate(ref SystemState state)
@@ -36,7 +36,7 @@ namespace Latios.LifeFX.Systems
 
             m_query = state.Fluent().With<TrackedWorldTransform>(false).WithWorldTransformReadOnly().Build();
 
-            m_worldTransformHandle = new WorldTransformReadOnlyTypeHandle(ref state);
+            m_worldTransformHandle = new WorldTransformReadOnlyAspect.TypeHandle(ref state);
 
             m_trackedTransforms = new NativeList<TransformQvvs>(1024, Allocator.Persistent);
             m_trackedEntities   = new NativeList<Entity>(1024, Allocator.Persistent);
@@ -62,7 +62,7 @@ namespace Latios.LifeFX.Systems
         {
             var chunkCount    = m_query.CalculateChunkCountWithoutFiltering();
             var newChunks     = new NativeList<DeferredChunk>(chunkCount, state.WorldUpdateAllocator);
-            var uploadIndices = new UnsafeParallelBlockList(4, 1024, state.WorldUpdateAllocator);
+            var uploadIndices = new UnsafeParallelBlockList<int>(1024, state.WorldUpdateAllocator);
             var aliveByThread = CollectionHelper.CreateNativeArray<UnsafeBitArray>(JobsUtility.ThreadIndexCount, state.WorldUpdateAllocator, NativeArrayOptions.ClearMemory);
             int reapCapacity  = m_trackedEntities.Length;
             var reaped        = new NativeList<int>(reapCapacity, state.WorldUpdateAllocator);
@@ -127,7 +127,7 @@ namespace Latios.LifeFX.Systems
         struct UpdateJob : IJobChunk
         {
             [ReadOnly] public EntityTypeHandle                                     entityHandle;
-            [ReadOnly] public WorldTransformReadOnlyTypeHandle                     worldTransformHandle;
+            [ReadOnly] public WorldTransformReadOnlyAspect.TypeHandle                     worldTransformHandle;
             [ReadOnly] public ComponentTypeHandle<TrackedWorldTransformEnableFlag> enabledFlagHandle;
             [ReadOnly] public NativeArray<Entity>                                  trackedEntities;
 
@@ -135,7 +135,7 @@ namespace Latios.LifeFX.Systems
             [NativeDisableParallelForRestriction] public NativeArray<TransformQvvs>  trackedTransforms;
             [NativeDisableParallelForRestriction] public NativeArray<UnsafeBitArray> aliveByThread;
             public NativeList<DeferredChunk>.ParallelWriter                          newChunks;
-            public UnsafeParallelBlockList                                           uploadIndices;
+            public UnsafeParallelBlockList<int>                                      uploadIndices;
             public AllocatorManager.AllocatorHandle                                  allocator;
             public uint                                                              lastSystemVersion;
 
@@ -198,7 +198,7 @@ namespace Latios.LifeFX.Systems
                         alive.Set(indices[i], true);
                         var transform = transforms[i].worldTransformQvvs;
                         var mask      = math.select(2, 3, !enabledMask.EnableBit.IsValid || enabledMask[i]);
-                        Bits.SetBits(ref transform.worldIndex, 30, 2, mask);
+                        Bits.SetBits(ref transform.context32, 30, 2, mask);
                         if (!AreQvvsEqual(in transform, trackedTransforms[indices[i]]))
                         {
                             trackedTransforms[indices[i]] = transform;
@@ -213,7 +213,7 @@ namespace Latios.LifeFX.Systems
             static bool AreQvvsEqual(in TransformQvvs a, in TransformQvvs b)
             {
                 var q = a.rotation.value == b.rotation.value;
-                var v = new uint4(math.asuint(a.position), math.asuint(a.worldIndex)) == new uint4(math.asuint(b.position), math.asuint(b.worldIndex));
+                var v = new uint4(math.asuint(a.position), math.asuint(a.context32)) == new uint4(math.asuint(b.position), math.asuint(b.context32));
                 var s = new float4(a.stretch, a.scale) == new float4(b.stretch, b.scale);
                 return math.all(q & v & s);
             }
@@ -223,7 +223,7 @@ namespace Latios.LifeFX.Systems
         struct ReapJob : IJobParallelForBatch
         {
             [ReadOnly] public NativeArray<UnsafeBitArray>                               aliveByThread;
-            public UnsafeParallelBlockList                                              uploadIndices;
+            public UnsafeParallelBlockList<int>                                         uploadIndices;
             [NativeDisableParallelForRestriction] public NativeArray<Entity>            trackedEntities;
             [NativeDisableParallelForRestriction] public NativeArray<TransformQvvs>     trackedTransforms;
             [NativeDisableParallelForRestriction] public NativeList<int>.ParallelWriter reaped;
@@ -258,7 +258,7 @@ namespace Latios.LifeFX.Systems
                     uploadIndices.Write(dead, threadIndex);
                     trackedEntities[dead]    = default;
                     var transform            = trackedTransforms[dead];
-                    transform.worldIndex    &= 0x7fffffff;
+                    transform.context32    &= 0x7fffffff;
                     trackedTransforms[dead]  = transform;
                 }
             }
@@ -268,14 +268,14 @@ namespace Latios.LifeFX.Systems
         struct AllocateNewJob : IJob
         {
             [ReadOnly] public EntityTypeHandle                 entityHandle;
-            [ReadOnly] public WorldTransformReadOnlyTypeHandle worldTransformHandle;
+            [ReadOnly] public WorldTransformReadOnlyAspect.TypeHandle worldTransformHandle;
 
             public ComponentTypeHandle<TrackedWorldTransform> trackedTransformHandle;
             public NativeList<Entity>                         trackedEntities;
             public NativeList<TransformQvvs>                  trackedTransforms;
             public NativeList<int>                            freelist;
             public NativeArray<DeferredChunk>                 newChunks;
-            public UnsafeParallelBlockList                    uploadIndices;
+            public UnsafeParallelBlockList<int>               uploadIndices;
             public NativeList<int>                            reaped;
 
             [NativeSetThreadIndex]
@@ -300,7 +300,7 @@ namespace Latios.LifeFX.Systems
 
                         var transform = transforms[i].worldTransformQvvs;
                         var worldmask = 3;
-                        Bits.SetBits(ref transform.worldIndex, 30, 2, worldmask);
+                        Bits.SetBits(ref transform.context32, 30, 2, worldmask);
 
                         if (freelist.IsEmpty)
                         {

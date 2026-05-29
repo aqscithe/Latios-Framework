@@ -84,9 +84,41 @@ namespace Unity.Entities.Exposed
             return query._GetImpl()->_QueryData->HasEnableableComponents != 0;
         }
 
+        public static void SetOverrideChangeFilterVersion(in this EntityQuery query, uint overrideVersion)
+        {
+            query.SetChangedFilterRequiredVersion(overrideVersion);
+        }
+
+        public static unsafe bool IsCreated(in this EntityStorageInfoLookup entityStorageInfoLookup)
+        {
+            var                     esil = entityStorageInfoLookup;
+            EntityStorageInfoLookup def  = default;
+            return UnsafeUtility.MemCmp(&esil, &def, UnsafeUtility.SizeOf<EntityStorageInfoLookup>()) == 0;
+        }
+
+        public static unsafe ComponentTypeHandle<T> ToHandle<T>(this ComponentLookup<T> lookup, bool isReadOnly) where T : unmanaged, IComponentData
+        {
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+            return new ComponentTypeHandle<T>(lookup.m_Safety, isReadOnly, lookup.GlobalSystemVersion);
+#else
+            return new ComponentTypeHandle<T>(isReadOnly, lookup.GlobalSystemVersion);
+#endif
+        }
+
+        public static unsafe BufferTypeHandle<T> ToHandle<T>(this BufferLookup<T> lookup, bool isReadOnly) where T : unmanaged, IBufferElementData
+        {
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+            return new BufferTypeHandle<T>(lookup.m_Safety0, lookup.m_ArrayInvalidationSafety, isReadOnly, lookup.GlobalSystemVersion);
+#else
+            return new BufferTypeHandle<T>(isReadOnly, lookup.GlobalSystemVersion);
+#endif
+        }
+
+        // The following do not check safety. Always check some safety handle such as EntityStorageInfoLookup.Exists() before use.
         public static unsafe ulong GetBloomMask(in this EntityArchetype archetype) => archetype.Archetype->BloomFilterMask;
         public static unsafe bool HasChunkHeader(in this EntityArchetype archetype) => archetype.Archetype->HasChunkHeader;
         public static unsafe bool HasSystemInstanceComponents(in this EntityArchetype archetype) => archetype.Archetype->HasSystemInstanceComponents;
+        public static unsafe bool IsCleanup(in this EntityArchetype archetype) => archetype.Archetype->CleanupResidueArchetype == archetype.Archetype;
         public static unsafe int GetChunkComponentCount(in this EntityArchetype archetype) => archetype.Archetype->NumChunkComponents;
         public static unsafe int GetBufferComponentCount(in this EntityArchetype archetype) => archetype.Archetype->NumBufferComponents;
         public static unsafe TypeIndex GetTypeAtIndex(in this EntityArchetype archetype, int index) => archetype.Archetype->Types[index].TypeIndex;

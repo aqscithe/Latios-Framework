@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.InteropServices;
+using Latios.Calci;
 using Latios.Transforms;
 using Latios.Unsafe;
 using Unity.Burst.CompilerServices;
@@ -108,7 +109,7 @@ namespace Latios.Psyshock
             aabb.min         *= inverseScale;
             aabb.max         *= inverseScale;
             aabb.min          = math.select(aabb.min, float.MinValue, math.isnan(aabb.min));
-            aabb.max          = math.select(aabb.max, float.MinValue, math.isnan(aabb.max));
+            aabb.max          = math.select(aabb.max, float.MaxValue, math.isnan(aabb.max));
             FindTriangles(in aabb, ref processor);
         }
 
@@ -119,12 +120,12 @@ namespace Latios.Psyshock
         /// <typeparam name="T">An IFindTrianglesProcessor</typeparam>
         /// <param name="triMeshSpaceAabb">The Aabb in the blob's local (untransformed) space</param>
         /// <param name="processor">The processor which should handle each result found</param>
-        public void FindTriangles<T>(in Aabb triMeshSpaceAabb, ref T processor) where T : unmanaged, IFindTrianglesProcessor
+        public unsafe void FindTriangles<T>(in Aabb triMeshSpaceAabb, ref T processor) where T : unmanaged, IFindTrianglesProcessor
         {
             if (intervalTree.Length == 0)
                 return;
 
-            var linearSweepStartIndex = BinarySearchFirstGreaterOrEqual(triMeshSpaceAabb.min.x);
+            var linearSweepStartIndex = BinarySearch.FirstGreaterOrEqual((float*)xmins.GetUnsafePtr(), xmins.Length, triMeshSpaceAabb.min.x);
 
             var    qxmax     = triMeshSpaceAabb.max.x;
             float4 qyzMinMax = new float4(triMeshSpaceAabb.max.yz, -triMeshSpaceAabb.min.yz);
@@ -232,53 +233,17 @@ namespace Latios.Psyshock
 
             mesh.GetVertices(vector3Cache);
 
-            int trisSoFar = 0;
+            int indicesSoFar = 0;
             for (int i = 0; i < mesh.subMeshCount; i++)
             {
                 var descriptor = mesh.GetSubMesh(i);
                 if (descriptor.topology != UnityEngine.MeshTopology.Triangles)
                     continue;
-                mesh.GetIndices(indicesCache.GetSubArray(trisSoFar * 3, descriptor.indexCount), i);
-                trisSoFar += descriptor.indexCount;
+                mesh.GetIndices(indicesCache.GetSubArray(indicesSoFar, descriptor.indexCount), i);
+                indicesSoFar += descriptor.indexCount;
             }
 
             return BuildBlob(ref builder, vector3Cache.Reinterpret<float3>().AsReadOnlySpan(), indicesCache.Reinterpret<int3>(4).AsReadOnlySpan(), in name, allocator);
-        }
-
-        // Returns count if nothing is greater or equal
-        //   The following function is a C# and Burst adaptation of Paul-Virak Khuong and Pat Morin's
-        //   optimized sequential order binary search: https://github.com/patmorin/arraylayout/blob/master/src/sorted_array.h
-        //   This code is licensed under the Creative Commons Attribution 4.0 International License (CC BY 4.0)
-        private unsafe int BinarySearchFirstGreaterOrEqual(float searchValue)
-        {
-            float* array = (float*)xmins.GetUnsafePtr();
-            int    count = xmins.Length;
-
-            for (int i = 1; i < count; i++)
-            {
-                Hint.Assume(array[i] >= array[i - 1]);
-            }
-
-            var  basePtr = array;
-            uint n       = (uint)count;
-            while (Hint.Likely(n > 1))
-            {
-                var half    = n / 2;
-                n          -= half;
-                var newPtr  = &basePtr[half];
-
-                // As of Burst 1.8.0 prev 2
-                // Burst never loads &basePtr[half] into a register for newPtr, and instead uses dual register addressing instead.
-                // Because of this, instead of loading into the register, performing the comparison, using a cmov, and then a jump,
-                // Burst immediately performs the comparison, conditionally jumps, uses a lea, and then a jump.
-                // This is technically less instructions on average. But branch prediction may suffer as a result.
-                basePtr = *newPtr < searchValue ? newPtr : basePtr;
-            }
-
-            if (*basePtr < searchValue)
-                basePtr++;
-
-            return (int)(basePtr - array);
         }
 
         private static uint GetLeftChildIndex(uint currentIndex) => 2 * currentIndex + 1;

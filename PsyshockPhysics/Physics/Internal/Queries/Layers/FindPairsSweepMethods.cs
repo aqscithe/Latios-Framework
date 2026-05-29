@@ -240,7 +240,7 @@ namespace Latios.Psyshock
             BipartiteSweepDualIndicesFilteredCross(ref result, in bucketA.slices, indicesA, in bucketB.slices, indicesB, ref processor, in bucketAabb, true, allocator);
         }
 
-        public static int BipartiteSweepPlayCache<T>(UnsafeIndexedBlockList.Enumerator enumerator,
+        public static int BipartiteSweepPlayCache<T>(UnsafeIndexedBlockList<int2>.Enumerator enumerator,
                                                      in CollisionLayer layerA,
                                                      in CollisionLayer layerB,
                                                      int bucketIndexA,
@@ -258,7 +258,7 @@ namespace Latios.Psyshock
 
             do
             {
-                var indices = enumerator.GetCurrent<int2>();
+                var indices = enumerator.Current;
                 result.SetBucketRelativePairIndices(indices.x, indices.y);
                 processor.Execute(in result);
                 count++;
@@ -390,7 +390,7 @@ namespace Latios.Psyshock
                 var xmax    = xmaxs[i];
                 for (int j = i + 1; xmins[j] <= xmax; j++)
                 {
-                    if (math.bitmask(current < bucket.yzminmaxs[j]) == 0)
+                    if (math.bitmask(current < yzminmaxs[j]) == 0)
                     {
                         result.SetBucketRelativePairIndices(indices[i], indices[j]);
                         processor.Execute(in result);
@@ -893,16 +893,16 @@ namespace Latios.Psyshock
             {
                 // Advance to a.xmin > b.xmin
                 // Exclude equals case this time by continuing if equal
-                while (astart < indicesA.Length && bucketA.xmins[astart] <= xminsB[i])
+                while (astart < indicesA.Length && xminsA[astart] <= xminsB[i])
                     astart++;
                 if (astart >= indicesA.Length)
                     break;
 
                 var current = -yzminmaxsB[i].zwxy;
                 var xmax    = xmaxsB[i];
-                for (int j = astart; j < indicesA.Length && bucketA.xmins[j] <= xmax; j++)
+                for (int j = astart; j < indicesA.Length && xminsA[j] <= xmax; j++)
                 {
-                    if (math.bitmask(current < bucketA.yzminmaxs[j]) == 0)
+                    if (math.bitmask(current < yzminmaxsA[j]) == 0)
                     {
                         result.SetBucketRelativePairIndices(indicesA[j], indicesB[i]);
                         processor.Execute(in result);
@@ -934,9 +934,9 @@ namespace Latios.Psyshock
                     var index = indicesA[i];
                     if (cellAabb.xmax < bucketA.xmins[index])
                         break;
-                    if (bucketA.xmaxs[i] < cellAabb.xmin)
+                    if (bucketA.xmaxs[index] < cellAabb.xmin)
                         continue;
-                    if (math.bitmask((cellAabb.yzMinMaxFlipped < bucketA.yzminmaxs[i]) & cellAabb.finiteMask) == 0)
+                    if (math.bitmask((cellAabb.yzMinMaxFlipped < bucketA.yzminmaxs[index]) & cellAabb.finiteMask) == 0)
                     {
                         xminsA[newCount]     = bucketA.xmins[index];
                         xmaxsA[newCount]     = bucketA.xmaxs[index];
@@ -971,9 +971,9 @@ namespace Latios.Psyshock
                     var index = indicesB[i];
                     if (cellAabb.xmax < bucketB.xmins[index])
                         break;
-                    if (bucketB.xmaxs[i] < cellAabb.xmin)
+                    if (bucketB.xmaxs[index] < cellAabb.xmin)
                         continue;
-                    if (math.bitmask((cellAabb.yzMinMaxFlipped < bucketB.yzminmaxs[i]) & cellAabb.finiteMask) == 0)
+                    if (math.bitmask((cellAabb.yzMinMaxFlipped < bucketB.yzminmaxs[index]) & cellAabb.finiteMask) == 0)
                     {
                         xminsB[newCount]     = bucketB.xmins[index];
                         xmaxsB[newCount]     = bucketB.xmaxs[index];
@@ -1025,16 +1025,16 @@ namespace Latios.Psyshock
             {
                 // Advance to a.xmin > b.xmin
                 // Exclude equals case this time by continuing if equal
-                while (astart < indicesA.Length && bucketA.xmins[astart] <= xminsB[i])
+                while (astart < indicesA.Length && xminsA[astart] <= xminsB[i])
                     astart++;
                 if (astart >= indicesA.Length)
                     break;
 
                 var current = -yzminmaxsB[i].zwxy;
                 var xmax    = xmaxsB[i];
-                for (int j = astart; j < indicesA.Length && bucketA.xmins[j] <= xmax; j++)
+                for (int j = astart; j < indicesA.Length && xminsA[j] <= xmax; j++)
                 {
-                    if (math.bitmask(current < bucketA.yzminmaxs[j]) == 0)
+                    if (math.bitmask(current < yzminmaxsA[j]) == 0)
                     {
                         result.SetBucketRelativePairIndices(indicesA[j], indicesB[i]);
                         processor.Execute(in result);

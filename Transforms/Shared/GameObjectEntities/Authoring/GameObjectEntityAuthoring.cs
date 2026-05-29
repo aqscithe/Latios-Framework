@@ -64,6 +64,7 @@ namespace Latios.Transforms
             entityManager                                                                                                 = latiosWorld.EntityManager;
             entity                                                                                                        = entityManager.CreateEntity();
             latiosWorld.latiosWorldUnmanaged.AddManagedStructComponent(entity, new GameObjectEntity { gameObjectTransform = transform });
+            entityManager.AddComponentData(entity, new GameObjectEntityUnmanaged { gameObject                             = gameObject });
 
             if (guid.Equals(default))
             {
@@ -71,7 +72,6 @@ namespace Latios.Transforms
                 if (enableTransformSyncing)
                 {
                     entityManager.AddComponent(entity, Abstract.QueryExtensions.GetAbstractWorldTransformRWComponentType());
-                    entityManager.AddComponentData(entity, new CopyTransformToEntity { useUniformScale = useUniformScale });
                 }
 
                 s_initializeCache.Clear();

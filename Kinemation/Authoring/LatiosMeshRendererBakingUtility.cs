@@ -13,13 +13,13 @@ namespace Latios.Kinemation.Authoring
 {
     class LatiosMeshRendererBakingUtility
     {
-        [BakingType]
-        internal struct CopyParentRequestTag : IRequestCopyParentTransform { }
-
         [BakingType] struct RequestPreviousTag : IRequestPreviousTransform { }
 
-        static List<int>  s_validIndexCache   = new List<int>();
-        static Material[] s_materialSpanCache = new Material[1];
+        static List<int>                                 s_validIndexCache                          = new List<int>();
+        static Material[]                                s_materialSpanCache                        = new Material[1];
+        static List<BakingStreamingTexture>              s_bakingStreamingTextureCache              = new List<BakingStreamingTexture>();
+        static List<BakingStreamingTextureMeshUv0Metric> s_bakingStreamingTextureMeshUv0MetricCache = new List<BakingStreamingTextureMeshUv0Metric>();
+        static List<int>                                 s_texturePropertyIDsCache                  = new List<int>();
 
         internal static void Convert(IBaker baker,
                                      ReadOnlySpan<MeshRendererBakeSettings>    rendererSettings,
@@ -67,8 +67,11 @@ namespace Latios.Kinemation.Authoring
 
                 var countInRenderer = meshMaterialSubmeshCountsByRenderer[rendererIndex];
                 s_validIndexCache.Clear();
-                DeformClassification                             classification = DeformClassification.None;
-                RenderMeshUtility.EntitiesGraphicsComponentFlags flags          = RenderMeshUtility.EntitiesGraphicsComponentFlags.UseRenderMeshArray;
+                DeformClassification                             classification    = DeformClassification.None;
+                RenderMeshUtility.EntitiesGraphicsComponentFlags flags             = RenderMeshUtility.EntitiesGraphicsComponentFlags.UseRenderMeshArray;
+                float                                            meshLodSlope      = float.MaxValue;
+                float                                            meshLodMeshBias   = float.MaxValue;
+                int                                              meshLodLevelCount = int.MaxValue;
 
                 for (int i = 0; i < countInRenderer; i++)
                 {
@@ -95,6 +98,16 @@ namespace Latios.Kinemation.Authoring
 
                     baker.DependsOn(mesh);
                     baker.DependsOn(material);
+
+                    if ((mms.lodMask & 0x1) != 0)
+                    {
+#if UNITY_6000_2_OR_NEWER
+                        meshLodLevelCount = math.min(meshLodLevelCount, mesh.lodCount);
+                        var slope = mesh.lodSelectionCurve;
+                        meshLodSlope    = math.min(meshLodSlope, slope.lodSlope);
+                        meshLodMeshBias = math.min(meshLodMeshBias, slope.lodBias);
+#endif
+                    }
 
                     var mmsClassification = GetDeformClassificationFromMaterial(material);
                     if (renderer.isDeforming && mmsClassification == DeformClassification.None && !renderer.suppressDeformationWarnings)
@@ -129,6 +142,31 @@ namespace Latios.Kinemation.Authoring
 
                     AddRendererComponents(renderer.targetEntity, baker, in renderer, flags);
 
+                    bool requireCrossfade = renderer.requireLodCrossfade;
+                    if (meshLodLevelCount > 1 && meshLodLevelCount != int.MaxValue)
+                    {
+                        requireCrossfade = true;
+                        if (renderer.overrideMeshLod >= 0)
+                        {
+                            baker.AddComponent(renderer.targetEntity, new MeshLod { levelCount = (ushort)meshLodLevelCount, lodLevel = (ushort)renderer.overrideMeshLod });
+                        }
+                        else
+                        {
+                            baker.AddComponent(renderer.targetEntity, new MeshLod { levelCount = (ushort)meshLodLevelCount, lodLevel = 0 });
+                            baker.AddComponent(renderer.targetEntity, new MeshLodCurve
+                            {
+                                slope         = meshLodSlope,
+                                preClampBias  = (half)meshLodMeshBias,
+                                postClampBias = (half)renderer.meshLodRendererBias
+                            });
+                        }
+                    }
+                    if (requireCrossfade)
+                    {
+                        baker.AddComponent<LodCrossfade>(renderer.targetEntity);
+                        baker.SetComponentEnabled<LodCrossfade>(renderer.targetEntity, false);
+                    }
+
                     if (renderer.isDeforming && primaryRendererIndex >= 0)
                     {
                         AddMaterialPropertiesFromDeformClassification(baker, renderer.targetEntity, classification);
@@ -155,8 +193,10 @@ namespace Latios.Kinemation.Authoring
                     if (primaryRendererIndex >= 0)
                     {
                         baker.AddComponent<AdditionalMeshRendererEntity>(renderer.targetEntity);
+#if !LATIOS_TRANSFORMS_UNITY
                         if (!renderer.isStatic)
-                            baker.AddComponent<CopyParentRequestTag>(renderer.targetEntity);
+                            baker.AddInheritanceFlags(renderer.targetEntity, InheritanceFlags.CopyParent);
+#endif
                     }
                     else
                         primaryRendererIndex = rendererIndex;
@@ -164,6 +204,7 @@ namespace Latios.Kinemation.Authoring
                     var mmsBuffer      = baker.AddBuffer<BakingMaterialMeshSubmesh>(renderer.targetEntity);
                     mmsBuffer.Capacity = s_validIndexCache.Count;
 
+                    s_bakingStreamingTextureCache.Clear();
                     foreach (var i in s_validIndexCache)
                     {
                         var src = meshMaterialSubmeshes[i];
@@ -173,6 +214,19 @@ namespace Latios.Kinemation.Authoring
                             material = src.material,
                             submesh  = src.submesh | (src.lodMask << 24)
                         });
+                        AddMeshAndMaterialToMipMapStreamingCache(baker, src);
+                    }
+                    if (s_bakingStreamingTextureCache.Count > 0)
+                    {
+                        var bstBuffer = baker.AddBuffer<BakingStreamingTexture>(renderer.targetEntity);
+                        bstBuffer.EnsureCapacity(s_bakingStreamingTextureCache.Count);
+                        foreach (var t in s_bakingStreamingTextureCache)
+                            bstBuffer.Add(t);
+                        var metricsBuffer = baker.AddBuffer<BakingStreamingTextureMeshUv0Metric>(renderer.targetEntity);
+                        metricsBuffer.EnsureCapacity(s_bakingStreamingTextureMeshUv0MetricCache.Count);
+                        foreach (var m in s_bakingStreamingTextureMeshUv0MetricCache)
+                            metricsBuffer.Add(m);
+                        baker.AddComponent<StreamingMipMapArray>(renderer.targetEntity);
                     }
                 }
                 rangeStart += meshMaterialSubmeshCountsByRenderer[rendererIndex];
@@ -226,6 +280,44 @@ namespace Latios.Kinemation.Authoring
             return classification;
         }
 
+        internal static void AddMeshAndMaterialToMipMapStreamingCache(IBaker baker, MeshMaterialSubmeshSettings mms)
+        {
+            s_texturePropertyIDsCache.Clear();
+            Material material = mms.material;
+            material.GetTexturePropertyNameIDs(s_texturePropertyIDsCache);
+            bool added = false;
+            foreach (var id in s_texturePropertyIDsCache)
+            {
+                var t = material.GetTexture(id) as Texture2D;
+                if (t == null)
+                    continue;
+                baker.DependsOn(t);
+                if (!t.streamingMipmaps || t.mipmapCount < 2)
+                    continue;
+
+                s_bakingStreamingTextureCache.Add(new BakingStreamingTexture
+                {
+                    material    = mms.material,
+                    texture     = t,
+                    uvScale     = material.GetTextureScale(id),
+                    texelCount  = t.width * t.height,
+                    mipmapCount = t.mipmapCount
+                });
+                added = true;
+            }
+
+            if (added)
+            {
+                Mesh mesh = mms.mesh;
+                s_bakingStreamingTextureMeshUv0MetricCache.Add(new BakingStreamingTextureMeshUv0Metric
+                {
+                    mesh               = mms.mesh,
+                    uv0Metric          = mesh.GetUVDistributionMetric(0),
+                    localBoundsExtents = mesh.bounds.extents,
+                });
+            }
+        }
+
         private static void AddRendererComponents(Entity entity, IBaker baker, in MeshRendererBakeSettings settings, RenderMeshUtility.EntitiesGraphicsComponentFlags baseFlags)
         {
             // Add all components up front using as few calls as possible.
@@ -238,11 +330,14 @@ namespace Latios.Kinemation.Authoring
             for (int i = 0; i < componentSet.Length; i++)
             {
                 // Todo: What to do for Unity Transforms?
-#if !LATIOS_TRANSFORMS_UNCACHED_QVVS && !LATIOS_TRANSFORMS_UNITY
+#if !LATIOS_TRANSFORMS_UNITY
                 if (componentSet.GetTypeIndex(i) == TypeManager.GetTypeIndex<PreviousTransform>())
                     baker.AddComponent<RequestPreviousTag>(entity);
 #endif
             }
+
+            if (settings.rendererPriority != 0)
+                baker.AddComponent(entity, new RendererPriority { priority = settings.rendererPriority });
 
             baker.SetSharedComponentManaged(entity, settings.renderMeshDescription.FilterSettings);
 

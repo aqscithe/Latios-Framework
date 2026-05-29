@@ -48,7 +48,7 @@ namespace Latios.Myri.Systems
 
         BlobRetainer m_blobRetainer;
 
-        WorldTransformReadOnlyTypeHandle m_worldTransformHandle;
+        WorldTransformReadOnlyAspect.TypeHandle m_worldTransformHandle;
 
         LatiosWorldUnmanaged latiosWorld;
 
@@ -58,24 +58,14 @@ namespace Latios.Myri.Systems
 
             m_initialized = false;
 
-            latiosWorld.worldBlackboardEntity.AddComponentDataIfMissing(new AudioSettings
-            {
-                masterVolume                  = 1f,
-                masterGain                    = 1f,
-                masterLimiterDBRelaxPerSecond = BrickwallLimiter.kDefaultReleaseDBPerSample * 48000f,
-                masterLimiterLookaheadTime    = 255.9f / 48000f,
-                safetyAudioFrames             = 2,
-                audioFramesPerUpdate          = 1,
-                lookaheadAudioFrames          = 1,
-                logWarningIfBuffersAreStarved = false
-            });
+            latiosWorld.worldBlackboardEntity.AddComponentDataIfMissing(AudioSettings.kDefault);
 
             // Create queries
             m_aliveListenersQuery = state.Fluent().With<AudioListener>(true).Build();
             m_deadListenersQuery  = state.Fluent().Without<AudioListener>().With<ListenerGraphState>().Build();
-            m_sourcesQuery        = state.Fluent().With<AudioSourceVolume, AudioSourceDistanceFalloff>(true).With<AudioSourceClip>(false).Build();
+            m_sourcesQuery        = state.Fluent().With<AudioSourceVolume>(true).With<AudioSourceClip>(false).Build();
 
-            m_worldTransformHandle = new WorldTransformReadOnlyTypeHandle(ref state);
+            m_worldTransformHandle = new WorldTransformReadOnlyAspect.TypeHandle(ref state);
         }
 
         public bool ShouldUpdateSystem(ref SystemState state)
