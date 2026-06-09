@@ -1,4 +1,5 @@
 using Unity.Mathematics;
+using UnityEngine;
 
 namespace Latios.Calci
 {
@@ -6,6 +7,7 @@ namespace Latios.Calci
     /// Configuration for a <see cref="LevyStruggleState"/> simulation.
     /// All fields are pre-set to balanced defaults suitable for a medium-intensity grip struggle.
     /// </summary>
+    [System.Serializable]
     public struct LevyStruggleParams
     {
         /// <summary>
@@ -17,24 +19,33 @@ namespace Latios.Calci
         /// <item><description>2.5 — controlled (small steps dominate)</description></item>
         /// </list>
         /// </summary>
+        [Tooltip("Lévy tail exponent (0, 3]. Lower = frequent large slips (chaotic); higher = small " +
+                 "steps dominate (controlled). Rule of thumb: 1.5 chaotic, 2.0 balanced, 2.5 tight.")]
         public float alpha;
 
         /// <summary>
         /// Minimum Lévy step length (world units). Sets the floor of the distribution. Must be > 0.
         /// Default: 0.01.
         /// </summary>
+        [Tooltip("Smallest Lévy slip length, in world units. Floor of the distribution; must be > 0 " +
+                 "AND <= maxSlipMagnitude (the Lévy sampler throws otherwise). Sets the quietest " +
+                 "twitch the simulation can produce.")]
         public float minStepSize;
 
         /// <summary>
         /// Maximum slip magnitude (world units). Lévy steps are clamped to this value.
         /// Default: 0.5.
         /// </summary>
+        [Tooltip("Largest Lévy slip length (world units). Lévy steps are clamped to this. Sets the " +
+                 "peak per-slip displacement — how violent a single twitch can be.")]
         public float maxSlipMagnitude;
 
         /// <summary>
         /// Number of Lévy steps applied per second. Controls the temporal rate of slipping.
         /// Default: 8.
         /// </summary>
+        [Tooltip("How many Lévy slip events fire per second. Higher = rapid, buzzy motion; " +
+                 "lower = sparse, jerky tugs. Sets the temporal rhythm of the struggle.")]
         public float stepsPerSecond;
 
         /// <summary>
@@ -43,6 +54,9 @@ namespace Latios.Calci
         /// Typically driven by a gameplay mechanic such as a grip-strength meter.
         /// Default: 0.5.
         /// </summary>
+        [Tooltip("Overall amplitude in [0,1]. 0 = perfect control (no struggle), 1 = about to slip " +
+                 "free. Simultaneously scales Lévy displacement UP and the restoring spring DOWN, " +
+                 "so increasing it widens both peak displacement and dwell time away from rest.")]
         public float struggleFactor;
 
         /// <summary>
@@ -57,6 +71,9 @@ namespace Latios.Calci
         /// </para>
         /// Default: 0.02.
         /// </summary>
+        [Tooltip("Pink-noise micro-tremor amplitude — the constant low-grade jitter underneath the " +
+                 "Lévy slips. Units depend on damping: damping=0 (first-order) is world units / sec " +
+                 "of position offset; damping>0 (second-order) is m/s² of acceleration.")]
         public float pinkNoiseIntensity;
 
         /// <summary>
@@ -67,11 +84,15 @@ namespace Latios.Calci
         /// <b>First-order path:</b> applied as a direct position correction per second (units: s⁻¹).
         /// </para>
         /// <para>
-        /// <b>Second-order path:</b> acts as a spring acceleration (units: s⁻²). The natural
+        /// <b>Second-order path:</b> acts as a spring acceleration (units: s⁻²). The natural " +
         /// frequency of the oscillator is <c>ω₀ = √biasStrength</c> rad/s.
         /// </para>
         /// Default: 2.0.
         /// </summary>
+        [Tooltip("Spring constant pulling the attachment back to its rest pose. Higher = snappier " +
+                 "return. Scaled by (1 − struggleFactor), so it weakens as struggle climbs. " +
+                 "In second-order mode (damping>0), effective natural frequency " +
+                 "ω₀ = √(biasStrength × (1 − struggleFactor)).")]
         public float biasStrength;
 
         /// <summary>
@@ -95,6 +116,11 @@ namespace Latios.Calci
         /// Set to 0 (default) to use the original first-order path with no velocity state.
         /// Default: 0.
         /// </summary>
+        [Tooltip("Velocity damping γ (1/s). 0 = first-order mode: slips move position directly, no " +
+                 "inertia. >0 = second-order mode: slips/noise become accelerations on a velocity, " +
+                 "so motion overshoots and rings — the 'fighting momentum' feel. Damping ratio " +
+                 "ζ = γ / (2ω₀); target ζ ≈ 0.4–0.6 for a natural underdamped ring. " +
+                 "ζ ≥ 1 = no ring; ζ << 1 = long ring-down.")]
         public float damping;
 
         /// <summary>Returns a <see cref="LevyStruggleParams"/> populated with all default values.</summary>
