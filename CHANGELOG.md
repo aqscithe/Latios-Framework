@@ -10,6 +10,76 @@ You can find changelogs for the individual modules in the [official Latios
 Framework Documentation
 repository](https://github.com/Dreaming381/Latios-Framework-Documentation).
 
+## [0.15.12] – 2026-7-25
+
+Officially supports Entities [1.4.8]
+
+### Changed
+
+-   Updated Psyshock to v0.15.12
+-   Updated Kinemation to v0.15.12
+
+## [0.15.11] – 2026-7-18
+
+Officially supports Entities [1.4.8]
+
+### Changed
+
+-   Updated Core to v0.15.11
+-   Updated Calci to v0.15.11
+-   Updated Psyshock to v0.15.11
+-   Updated Kinemation to v0.15.11
+
+## [0.15.10] – 2026-7-11
+
+Officially supports Entities [1.4.7]
+
+### Changed
+
+-   Updated Core to v0.15.10
+-   Updated QVVS Transforms to v0.15.10
+-   Updated Psyshock to v0.15.10
+-   Updated Unika to v0.15.10
+
+## [0.15.9] – 2026-6-27
+
+Officially supports Entities [1.4.7]
+
+### Changed
+
+-   Updated Psyshock to v0.15.9
+-   Updated Kinemation to v0.15.9
+
+## [0.15.8] – 2026-6-20
+
+Officially supports Entities [1.4.7]
+
+### Changed
+
+-   Updated Core to v0.15.8
+-   Updated QVVS Transforms to v0.15.8
+-   Updated Psyshock to v0.15.8
+-   Updated Kinemation to v0.15.8
+
+## [0.15.7] – 2026-6-13
+
+Officially supports Entities [1.4.6]
+
+### Changed
+
+-   Updated Psyshock to v0.15.7
+-   Updated Myri to v0.15.7
+-   Updated Kinemation to v0.15.7
+
+## [0.15.6] – 2026-6-7
+
+Officially supports Entities [1.4.6]
+
+### Changed
+
+-   Updated Core to v0.15.6
+-   Updated Psyshock to v0.15.6
+
 ## [0.15.5] – 2026-5-23
 
 Officially supports Entities [1.4.6]

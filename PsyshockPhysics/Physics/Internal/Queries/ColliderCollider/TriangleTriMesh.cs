@@ -7,6 +7,23 @@ namespace Latios.Psyshock
 {
     internal static class TriangleTriMesh
     {
+        public static bool AreOverlapping(in TriMeshCollider triMesh,
+                                          in RigidTransform triMeshTransform,
+                                          in TriangleCollider triangle,
+                                          in RigidTransform triangleTransform)
+        {
+            return WithinDistance(in triMesh, in triMeshTransform, in triangle, in triangleTransform, 0f);
+        }
+
+        public static bool WithinDistance(in TriMeshCollider triMesh,
+                                          in RigidTransform triMeshTransform,
+                                          in TriangleCollider triangle,
+                                          in RigidTransform triangleTransform,
+                                          float maxDistance)
+        {
+            return DistanceBetween(in triMesh, in triMeshTransform, in triangle, in triangleTransform, maxDistance, out _);
+        }
+
         public static bool DistanceBetween(in TriMeshCollider triMesh,
                                            in RigidTransform triMeshTransform,
                                            in TriangleCollider triangle,
@@ -250,7 +267,7 @@ namespace Latios.Psyshock
             {
                 var triangle2 = Physics.ScaleStretchCollider(blob.Value.triangles[index], 1f, scale);
                 // Check that we don't start already intersecting.
-                if (TriangleTriangle.DistanceBetween(in triangle, in targetTransform, in triangle2, in castStart, 0f, out _))
+                if (TriangleTriangle.AreOverlapping(in triangle, in targetTransform, in triangle2, in castStart))
                 {
                     invalid = true;
                     return false;

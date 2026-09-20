@@ -1,3 +1,4 @@
+using System;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Mathematics;
 
@@ -5,6 +6,23 @@ namespace Latios.Psyshock
 {
     internal static class SphereTerrain
     {
+        public static bool AreOverlapping(in TerrainCollider terrain,
+                                          in RigidTransform terrainTransform,
+                                          in SphereCollider sphere,
+                                          in RigidTransform sphereTransform)
+        {
+            return WithinDistance(in terrain, in terrainTransform, in sphere, in sphereTransform, 0f);
+        }
+
+        public static bool WithinDistance(in TerrainCollider terrain,
+                                          in RigidTransform terrainTransform,
+                                          in SphereCollider sphere,
+                                          in RigidTransform sphereTransform,
+                                          float maxDistance)
+        {
+            return DistanceBetween(in terrain, in terrainTransform, in sphere, in sphereTransform, maxDistance, out _);
+        }
+
         public static bool DistanceBetween(in TerrainCollider terrain,
                                            in RigidTransform terrainTransform,
                                            in SphereCollider sphere,
@@ -248,6 +266,22 @@ namespace Latios.Psyshock
             return ContactManifoldHelpers.GetSingleContactManifold(in distanceResult);
         }
 
+        public static int LatiosContactsBetween(Span<LatiosSim.Contact>   contacts,
+                                                float3 contactNormal,
+                                                in TerrainCollider terrain,
+                                                in RigidTransform terrainTransform,
+                                                in SphereCollider sphere,
+                                                in RigidTransform sphereTransform,
+                                                in ColliderDistanceResult distanceResult)
+        {
+            var triangleIndices = terrain.terrainColliderBlob.Value.GetTriangle(distanceResult.subColliderIndexA);
+            var triangle        = PointRayTerrain.CreateLocalTriangle(ref terrain.terrainColliderBlob.Value,
+                                                                      triangleIndices,
+                                                                      terrain.baseHeightOffset,
+                                                                      terrain.scale);
+            return SphereTriangle.LatiosContactsBetween(contacts, contactNormal, in triangle, in terrainTransform, in sphere, in sphereTransform, in distanceResult);
+        }
+
         unsafe struct DistanceBetweenAllProcessor<T> : TerrainColliderBlob.IFindTrianglesProcessor where T : unmanaged, IDistanceBetweenAllProcessor
         {
             public SphereCollider sphere;
@@ -311,7 +345,6 @@ namespace Latios.Psyshock
                     return;
 
                 var triangle = PointRayTerrain.CreateLocalTriangle(ref blob, triangleHeightIndices, heightOffset, scale);
-                Physics.ScaleStretchCollider(ref triangle, 1f, scale);
                 // Check that we don't start already intersecting.
                 if (PointRayTriangle.PointTriangleDistance(rayInScaledTerrainSpace.start, in triangle, radius, out _))
                 {

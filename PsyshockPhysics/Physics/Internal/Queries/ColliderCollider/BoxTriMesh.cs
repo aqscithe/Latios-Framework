@@ -1,5 +1,3 @@
-using Latios.Transforms;
-using Unity.Collections.LowLevel.Unsafe;
 using Unity.Entities;
 using Unity.Mathematics;
 
@@ -7,6 +5,23 @@ namespace Latios.Psyshock
 {
     internal static class BoxTriMesh
     {
+        public static bool AreOverlapping(in TriMeshCollider triMesh,
+                                          in RigidTransform triMeshTransform,
+                                          in BoxCollider box,
+                                          in RigidTransform boxTransform)
+        {
+            return WithinDistance(in triMesh, in triMeshTransform, in box, in boxTransform, 0f);
+        }
+
+        public static bool WithinDistance(in TriMeshCollider triMesh,
+                                          in RigidTransform triMeshTransform,
+                                          in BoxCollider box,
+                                          in RigidTransform boxTransform,
+                                          float maxDistance)
+        {
+            return DistanceBetween(in triMesh, in triMeshTransform, in box, in boxTransform, maxDistance, out _);
+        }
+
         public static bool DistanceBetween(in TriMeshCollider triMesh,
                                            in RigidTransform triMeshTransform,
                                            in BoxCollider box,
@@ -250,7 +265,7 @@ namespace Latios.Psyshock
             {
                 var triangle = Physics.ScaleStretchCollider(blob.Value.triangles[index], 1f, scale);
                 // Check that we don't start already intersecting.
-                if (BoxTriangle.DistanceBetween(in triangle, in targetTransform, in box, in castStart, 0f, out _))
+                if (BoxTriangle.AreOverlapping(in triangle, in targetTransform, in box, in castStart))
                 {
                     invalid = true;
                     return false;

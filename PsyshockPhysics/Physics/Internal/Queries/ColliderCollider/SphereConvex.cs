@@ -1,3 +1,4 @@
+using System;
 using Unity.Burst;
 using Unity.Mathematics;
 
@@ -5,7 +6,17 @@ namespace Latios.Psyshock
 {
     internal static class SphereConvex
     {
-        // Convex is first because it is cheaper to transform a sphere into A-space
+        public static bool AreOverlapping(in ConvexCollider convex, in RigidTransform convexTransform, in SphereCollider sphere, in RigidTransform sphereTransform)
+        {
+            return WithinDistance(in convex, in convexTransform, in sphere, in sphereTransform, 0f);
+        }
+
+        public static bool WithinDistance(in ConvexCollider convex, in RigidTransform convexTransform, in SphereCollider sphere, in RigidTransform sphereTransform,
+                                          float maxDistance)
+        {
+            return DistanceBetween(in convex, in convexTransform, in sphere, in sphereTransform, maxDistance, out _);
+        }
+
         public static bool DistanceBetween(in ConvexCollider convex, in RigidTransform convexTransform, in SphereCollider sphere, in RigidTransform sphereTransform,
                                            float maxDistance,
                                            out ColliderDistanceResult result)
@@ -107,6 +118,50 @@ namespace Latios.Psyshock
                                                                           in ColliderDistanceResult distanceResult)
         {
             return ContactManifoldHelpers.GetSingleContactManifold(in distanceResult);
+        }
+
+        public static int LatiosContactsBetween(Span<LatiosSim.Contact>   contacts,
+                                                float3 contactNormal,
+                                                in ConvexCollider convex,
+                                                in RigidTransform convexTransform,
+                                                in SphereCollider sphere,
+                                                in RigidTransform sphereTransform,
+                                                in ColliderDistanceResult distanceResult)
+        {
+            if (contacts.Length == 0)
+                return 0;
+            var dot = math.dot(contactNormal, distanceResult.normalA);
+            if (dot > 0.999f)
+            {
+                contacts[0] = new LatiosSim.Contact
+                {
+                    contactOnA  = distanceResult.hitpointA,
+                    distanceToB = distanceResult.distance
+                };
+                return 1;
+            }
+            if (dot <= 0f)
+                return 0;
+            Physics.GetCenterExtents(Physics.AabbFrom(convex, convexTransform), out _, out var extents);
+            var   castDistance = math.abs(distanceResult.distance) + math.length(extents) + sphere.radius;
+            var   castStart    = sphereTransform;
+            float castOffset   = 0f;
+            if (distanceResult.distance <= 0f)
+            {
+                castOffset     = (-distanceResult.distance * (1f + math.EPSILON) + math.EPSILON);
+                castStart.pos += contactNormal * castOffset;
+            }
+            if (ColliderCast(in sphere, in castStart, castStart.pos - castDistance * contactNormal, in convex, in convexTransform, out var castResult))
+            {
+                castResult.distance += castOffset;
+                contacts[0]          = new LatiosSim.Contact
+                {
+                    contactOnA  = castResult.hitpoint,
+                    distanceToB = castResult.distance
+                };
+                return 1;
+            }
+            return 0;
         }
 
         private static bool ConvexSphereDistance(in ConvexCollider convex, in SphereCollider sphere, float maxDistance, out ColliderDistanceResultInternal result)

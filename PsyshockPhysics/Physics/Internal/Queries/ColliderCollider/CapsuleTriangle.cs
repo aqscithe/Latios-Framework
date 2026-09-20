@@ -7,7 +7,23 @@ namespace Latios.Psyshock
 {
     internal static class CapsuleTriangle
     {
-        // Triangle is first because it is cheaper to transform a capsule into A-space
+        public static bool AreOverlapping(in TriangleCollider triangle,
+                                          in RigidTransform triangleTransform,
+                                          in CapsuleCollider capsule,
+                                          in RigidTransform capsuleTransform)
+        {
+            return WithinDistance(in triangle, in triangleTransform, in capsule, in capsuleTransform, 0f);
+        }
+
+        public static bool WithinDistance(in TriangleCollider triangle,
+                                          in RigidTransform triangleTransform,
+                                          in CapsuleCollider capsule,
+                                          in RigidTransform capsuleTransform,
+                                          float maxDistance)
+        {
+            return DistanceBetween(in triangle, in triangleTransform, in capsule, in capsuleTransform, maxDistance, out _);
+        }
+
         public static bool DistanceBetween(in TriangleCollider triangle,
                                            in RigidTransform triangleTransform,
                                            in CapsuleCollider capsule,
@@ -33,7 +49,7 @@ namespace Latios.Psyshock
                                         in RigidTransform targetTriangleTransform,
                                         out ColliderCastResult result)
         {
-            if (DistanceBetween(in targetTriangle, in targetTriangleTransform, in capsuleToCast, in castStart, 0f, out _))
+            if (AreOverlapping(in targetTriangle, in targetTriangleTransform, in capsuleToCast, in castStart))
             {
                 result = default;
                 return false;
@@ -93,7 +109,7 @@ namespace Latios.Psyshock
                                         in RigidTransform targetCapsuleTransform,
                                         out ColliderCastResult result)
         {
-            if (DistanceBetween(in triangleToCast, in castStart, in targetCapsule, in targetCapsuleTransform, 0f, out _))
+            if (AreOverlapping(in triangleToCast, in castStart, in targetCapsule, in targetCapsuleTransform))
             {
                 result = default;
                 return false;
@@ -216,7 +232,8 @@ namespace Latios.Psyshock
             simdFloat3 triEdges  = triPoints.bcaa - triPoints;
 
             float3 capEdge = capsule.pointB - capsule.pointA;
-            CapsuleCapsule.SegmentSegment(in triPoints, in triEdges, new simdFloat3(capsule.pointA), new simdFloat3(capEdge), out var closestTriEdges, out var closestCapsuleAxis);
+            CapsuleCapsule.SegmentSegmentOld(in triPoints, in triEdges, new simdFloat3(capsule.pointA), new simdFloat3(capEdge), out var closestTriEdges,
+                                             out var closestCapsuleAxis);
             float3 segSegDists      = simd.distancesq(closestTriEdges, closestCapsuleAxis).xyz;
             bool   bIsBetter        = segSegDists.y < segSegDists.x;
             float3 closestEdgePoint = math.select(closestTriEdges.a, closestTriEdges.b, bIsBetter);

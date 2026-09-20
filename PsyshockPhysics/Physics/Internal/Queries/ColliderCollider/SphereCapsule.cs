@@ -1,3 +1,4 @@
+using System;
 using Unity.Burst;
 using Unity.Burst.CompilerServices;
 using Unity.Mathematics;
@@ -6,7 +7,25 @@ namespace Latios.Psyshock
 {
     internal static class SphereCapsule
     {
-        // Capsule is first because it is cheaper to transform a sphere into A-space
+        public static bool AreOverlapping(in CapsuleCollider capsule,
+                                          in RigidTransform capsuleTransform,
+                                          in SphereCollider sphere,
+                                          in RigidTransform sphereTransform)
+        {
+            return WithinDistance(in capsule, in capsuleTransform, in sphere, in sphereTransform, 0f);
+        }
+
+        public static bool WithinDistance(in CapsuleCollider capsule,
+                                          in RigidTransform capsuleTransform,
+                                          in SphereCollider sphere,
+                                          in RigidTransform sphereTransform,
+                                          float maxDistance)
+        {
+            var    sphereInCapSpaceTransfrom = math.InverseTransformFast(in capsuleTransform, in sphereTransform);
+            float3 sphereCenterInCapSpace    = math.transform(sphereInCapSpaceTransfrom, sphere.center);
+            return PointRayCapsule.PointCapsuleWithin(sphereCenterInCapSpace, in capsule, sphere.radius + maxDistance);
+        }
+
         public static bool DistanceBetween(in CapsuleCollider capsule,
                                            in RigidTransform capsuleTransform,
                                            in SphereCollider sphere,
@@ -14,8 +33,7 @@ namespace Latios.Psyshock
                                            float maxDistance,
                                            out ColliderDistanceResult result)
         {
-            var            capWorldToLocal           = math.inverse(capsuleTransform);
-            var            sphereInCapSpaceTransfrom = math.mul(capWorldToLocal, sphereTransform);
+            var            sphereInCapSpaceTransfrom = math.InverseTransformFast(in capsuleTransform, in sphereTransform);
             float3         sphereCenterInCapSpace    = math.transform(sphereInCapSpaceTransfrom, sphere.center);
             SphereCollider sphereInCapSpace          = new SphereCollider(sphereCenterInCapSpace, sphere.radius);
             bool           hit                       = CapsuleSphereDistance(capsule,
@@ -111,34 +129,62 @@ namespace Latios.Psyshock
             return ContactManifoldHelpers.GetSingleContactManifold(in distanceResult);
         }
 
+        public static int LatiosContactsBetween(Span<LatiosSim.Contact>   contacts,
+                                                float3 contactNormal,
+                                                in CapsuleCollider capsule,
+                                                in RigidTransform capsuleTransform,
+                                                in SphereCollider sphere,
+                                                in RigidTransform sphereTransform,
+                                                in ColliderDistanceResult distanceResult)
+        {
+            if (contacts.Length == 0)
+                return 0;
+            var dot = math.dot(contactNormal, distanceResult.normalA);
+            if (dot > 0.999f)
+            {
+                contacts[0] = new LatiosSim.Contact
+                {
+                    contactOnA  = distanceResult.hitpointA,
+                    distanceToB = distanceResult.distance
+                };
+                return 1;
+            }
+            if (dot <= 0f)
+                return 0;
+            var   castDistance = math.abs(distanceResult.distance) + capsule.radius + sphere.radius;
+            var   castStart    = sphereTransform;
+            float castOffset   = 0f;
+            if (distanceResult.distance <= 0f)
+            {
+                castOffset     = (-distanceResult.distance * (1f + math.EPSILON) + math.EPSILON);
+                castStart.pos += contactNormal * castOffset;
+            }
+            if (ColliderCast(in sphere, in castStart, castStart.pos - castDistance * contactNormal, in capsule, in capsuleTransform, out var castResult))
+            {
+                castResult.distance += castOffset;
+                contacts[0]          = new LatiosSim.Contact
+                {
+                    contactOnA  = castResult.hitpoint,
+                    distanceToB = castResult.distance
+                };
+                return 1;
+            }
+            return 0;
+        }
+
         private static bool CapsuleSphereDistance(in CapsuleCollider capsule, in SphereCollider sphere, float maxDistance, out ColliderDistanceResultInternal result)
         {
-            //Strategy: Project p onto the capsule's line clamped to the segment. Then inflate point on line as sphere
-            float3 edge           = capsule.pointB - capsule.pointA;
-            float3 ap             = sphere.center - capsule.pointA;
-            float  dot            = math.dot(ap, edge);
-            float  edgeLengthSq   = math.lengthsq(edge);
-            dot                   = math.clamp(dot, 0f, edgeLengthSq);
-            float3 pointOnSegment = capsule.pointA;
-            if (dot > 0f)
-                pointOnSegment     += edge * dot / edgeLengthSq;
-            SphereCollider sphereA  = new SphereCollider(pointOnSegment, capsule.radius);
-            var            hit      = SphereSphere.SphereSphereDistance(in sphereA, in sphere, maxDistance, out result, out bool degenerate);
-            result.featureCodeA     = 0x4000;
-            result.featureCodeA     = (ushort)math.select(result.featureCodeA, 0, dot == 0f);
-            result.featureCodeA     = (ushort)math.select(result.featureCodeA, 1, dot == edgeLengthSq);
-            if (Hint.Likely(!degenerate))
-                return hit;
-
-            if (math.all(edge == 0f))
-                return hit;
-
-            mathex.GetDualPerpendicularNormalized(edge, out var capsuleNormal, out _);
-            result.normalA   = capsuleNormal;
-            result.normalB   = -capsuleNormal;
-            result.hitpointA = pointOnSegment - capsule.radius * capsuleNormal;
-            result.hitpointB = pointOnSegment + sphere.radius * capsuleNormal;
-            result.distance  = -capsule.radius - sphere.radius;
+            var hit = PointRayCapsule.PointCapsuleDistance(sphere.center, in capsule, maxDistance + sphere.radius, out var pointResult);
+            result  = new ColliderDistanceResultInternal
+            {
+                hitpointA    = pointResult.hitpoint,
+                hitpointB    = sphere.center - pointResult.normal * sphere.radius,
+                normalA      = pointResult.normal,
+                normalB      = -pointResult.normal,
+                distance     = pointResult.distance - sphere.radius,
+                featureCodeA = pointResult.featureCode,
+                featureCodeB = 0,
+            };
             return hit;
         }
     }

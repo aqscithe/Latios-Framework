@@ -1,3 +1,4 @@
+using System;
 using Unity.Burst;
 using Unity.Mathematics;
 
@@ -5,6 +6,24 @@ namespace Latios.Psyshock
 {
     internal static class SphereSphere
     {
+        public static bool AreOverlapping(in SphereCollider sphereA,
+                                          in RigidTransform aTransform,
+                                          in SphereCollider sphereB,
+                                          in RigidTransform bTransform)
+        {
+            return WithinDistance(in sphereA, in aTransform, in sphereB, in bTransform, 0f);
+        }
+
+        public static bool WithinDistance(in SphereCollider sphereA,
+                                          in RigidTransform aTransform,
+                                          in SphereCollider sphereB,
+                                          in RigidTransform bTransform,
+                                          float maxDistance)
+        {
+            var bInASpaceTransform = math.InverseTransformFast(aTransform, bTransform);
+            return PointRaySphere.WithinDistance(sphereA.center, in sphereB, in bInASpaceTransform, maxDistance + sphereA.radius);
+        }
+
         public static bool DistanceBetween(in SphereCollider sphereA,
                                            in RigidTransform aTransform,
                                            in SphereCollider sphereB,
@@ -12,8 +31,7 @@ namespace Latios.Psyshock
                                            float maxDistance,
                                            out ColliderDistanceResult result)
         {
-            var            aWorldToLocal      = math.inverse(aTransform);
-            var            bInASpaceTransform = math.mul(aWorldToLocal, bTransform);
+            var            bInASpaceTransform = math.InverseTransformFast(aTransform, bTransform);
             SphereCollider bInASpace          = new SphereCollider(math.transform(bInASpaceTransform, sphereB.center), sphereB.radius);
             bool           hit                = SphereSphereDistance(in sphereA, in bInASpace, maxDistance, out ColliderDistanceResultInternal localResult, out _);
             result                            = new ColliderDistanceResult
@@ -72,28 +90,65 @@ namespace Latios.Psyshock
             return ContactManifoldHelpers.GetSingleContactManifold(in distanceResult);
         }
 
+        public static int LatiosContactsBetween(Span<LatiosSim.Contact>   contacts,
+                                                float3 contactNormal,
+                                                in SphereCollider sphereA,
+                                                in RigidTransform aTransform,
+                                                in SphereCollider sphereB,
+                                                in RigidTransform bTransform,
+                                                in ColliderDistanceResult distanceResult)
+        {
+            if (contacts.Length == 0)
+                return 0;
+            var dot = math.dot(contactNormal, distanceResult.normalA);
+            if (dot > 0.999f)
+            {
+                contacts[0] = new LatiosSim.Contact
+                {
+                    contactOnA  = distanceResult.hitpointA,
+                    distanceToB = distanceResult.distance
+                };
+                return 1;
+            }
+            if (dot <= 0f)
+                return 0;
+            var   castDistance = math.abs(distanceResult.distance) + sphereA.radius + sphereB.radius;
+            var   castStart    = bTransform;
+            float castOffset   = 0f;
+            if (distanceResult.distance <= 0f)
+            {
+                castOffset     = (-distanceResult.distance * (1f + math.EPSILON) + math.EPSILON);
+                castStart.pos += contactNormal * castOffset;
+            }
+            if (ColliderCast(in sphereB, in castStart, castStart.pos - castDistance * contactNormal, in sphereA, in aTransform, out var castResult))
+            {
+                castResult.distance += castOffset;
+                contacts[0]          = new LatiosSim.Contact
+                {
+                    contactOnA  = castResult.hitpoint,
+                    distanceToB = castResult.distance
+                };
+                return 1;
+            }
+            return 0;
+        }
+
         internal static bool SphereSphereDistance(in SphereCollider sphereA,
                                                   in SphereCollider sphereB,
                                                   float maxDistance,
                                                   out ColliderDistanceResultInternal result,
                                                   out bool degenerate)
         {
-            float3 delta          = sphereB.center - sphereA.center;
-            float  ccDistanceSq   = math.lengthsq(delta);  //center center distance
-            bool   distanceIsZero = ccDistanceSq == 0.0f;
-            float  invCCDistance  = math.select(math.rsqrt(ccDistanceSq), 0.0f, distanceIsZero);
-            float3 normalA        = math.select(delta * invCCDistance, new float3(0, 1, 0), distanceIsZero);  // choose an arbitrary normal when the distance is zero
-            float  distance       = ccDistanceSq * invCCDistance - sphereA.radius - sphereB.radius;
-            result                = new ColliderDistanceResultInternal
+            var hit = PointRaySphere.PointSphereDistance(sphereA.center, in sphereB, maxDistance + sphereA.radius, out var pointResult, out degenerate);
+            result  = new ColliderDistanceResultInternal
             {
-                hitpointA = sphereA.center + normalA * sphereA.radius,
-                hitpointB = sphereA.center + normalA * (sphereA.radius + distance),  //hitpoint A + A's normal * distance [expand distributive property]
-                normalA   = normalA,
-                normalB   = -normalA,
-                distance  = distance,
+                hitpointA = sphereA.center - pointResult.normal * sphereA.radius,
+                hitpointB = pointResult.hitpoint,
+                normalA   = -pointResult.normal,
+                normalB   = pointResult.normal,
+                distance  = pointResult.distance - sphereA.radius
             };
-            degenerate = distanceIsZero;
-            return distance <= maxDistance;
+            return hit;
         }
     }
 }

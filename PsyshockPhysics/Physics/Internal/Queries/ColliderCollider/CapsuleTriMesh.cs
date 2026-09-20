@@ -1,5 +1,3 @@
-using Latios.Transforms;
-using Unity.Collections.LowLevel.Unsafe;
 using Unity.Entities;
 using Unity.Mathematics;
 
@@ -7,6 +5,23 @@ namespace Latios.Psyshock
 {
     internal static class CapsuleTriMesh
     {
+        public static bool AreOverlapping(in TriMeshCollider triMesh,
+                                          in RigidTransform triMeshTransform,
+                                          in CapsuleCollider capsule,
+                                          in RigidTransform capsuleTransform)
+        {
+            return WithinDistance(in triMesh, in triMeshTransform, in capsule, in capsuleTransform, 0f);
+        }
+
+        public static bool WithinDistance(in TriMeshCollider triMesh,
+                                          in RigidTransform triMeshTransform,
+                                          in CapsuleCollider capsule,
+                                          in RigidTransform capsuleTransform,
+                                          float maxDistance)
+        {
+            return DistanceBetween(in triMesh, in triMeshTransform, in capsule, in capsuleTransform, maxDistance, out _);
+        }
+
         public static bool DistanceBetween(in TriMeshCollider triMesh,
                                            in RigidTransform triMeshTransform,
                                            in CapsuleCollider capsule,
@@ -246,7 +261,7 @@ namespace Latios.Psyshock
             {
                 var triangle = Physics.ScaleStretchCollider(blob.Value.triangles[index], 1f, scale);
                 // Check that we don't start already intersecting.
-                if (CapsuleTriangle.DistanceBetween(in triangle, in targetTransform, in capsule, in castStart, 0f, out _))
+                if (CapsuleTriangle.AreOverlapping(in triangle, in targetTransform, in capsule, in castStart))
                 {
                     invalid = true;
                     return false;

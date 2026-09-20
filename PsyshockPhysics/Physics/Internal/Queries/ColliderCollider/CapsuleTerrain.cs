@@ -1,10 +1,26 @@
-using Unity.Collections.LowLevel.Unsafe;
 using Unity.Mathematics;
 
 namespace Latios.Psyshock
 {
     internal static class CapsuleTerrain
     {
+        public static bool AreOverlapping(in TerrainCollider terrain,
+                                          in RigidTransform terrainTransform,
+                                          in CapsuleCollider capsule,
+                                          in RigidTransform capsuleTransform)
+        {
+            return WithinDistance(in terrain, in terrainTransform, in capsule, in capsuleTransform, 0f);
+        }
+
+        public static bool WithinDistance(in TerrainCollider terrain,
+                                          in RigidTransform terrainTransform,
+                                          in CapsuleCollider capsule,
+                                          in RigidTransform capsuleTransform,
+                                          float maxDistance)
+        {
+            return DistanceBetween(in terrain, in terrainTransform, in capsule, in capsuleTransform, maxDistance, out _);
+        }
+
         public static bool DistanceBetween(in TerrainCollider terrain,
                                            in RigidTransform terrainTransform,
                                            in CapsuleCollider capsule,
@@ -330,9 +346,8 @@ namespace Latios.Psyshock
                     return;
 
                 var triangle = PointRayTerrain.CreateLocalTriangle(ref blob, triangleHeightIndices, heightOffset, scale);
-                Physics.ScaleStretchCollider(ref triangle, 1f, scale);
                 // Check that we don't start already intersecting.
-                if (CapsuleTriangle.DistanceBetween(in triangle, in terrainTransform, in capsule, in castStart, 0f, out _))
+                if (CapsuleTriangle.AreOverlapping(in triangle, in terrainTransform, in capsule, in castStart))
                 {
                     invalid = true;
                     return;

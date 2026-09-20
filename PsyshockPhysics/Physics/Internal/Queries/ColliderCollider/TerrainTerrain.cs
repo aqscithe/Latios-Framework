@@ -1,5 +1,4 @@
 using Unity.Mathematics;
-using UnityEngine;
 
 // May God bless the first poor soul who runs into performance problems while trying to do something with this code.
 
@@ -7,6 +6,23 @@ namespace Latios.Psyshock
 {
     internal static class TerrainTerrain
     {
+        public static bool AreOverlapping(in TerrainCollider terrainA,
+                                          in RigidTransform aTransform,
+                                          in TerrainCollider terrainB,
+                                          in RigidTransform bTransform)
+        {
+            return WithinDistance(in terrainA, in aTransform, in terrainB, in bTransform, 0f);
+        }
+
+        public static bool WithinDistance(in TerrainCollider terrainA,
+                                          in RigidTransform aTransform,
+                                          in TerrainCollider terrainB,
+                                          in RigidTransform bTransform,
+                                          float maxDistance)
+        {
+            return DistanceBetween(in terrainA, in aTransform, in terrainB, in bTransform, maxDistance, out _);
+        }
+
         public static bool DistanceBetween(in TerrainCollider terrainA,
                                            in RigidTransform aTransform,
                                            in TerrainCollider terrainB,
@@ -77,7 +93,7 @@ namespace Latios.Psyshock
             bool hit        = false;
             result          = default;
             result.distance = float.MaxValue;
-            if (DistanceBetween(in terrainToCast, in castStart, in targetTerrain, in targetTerrainTransform, 0f, out _))
+            if (AreOverlapping(in terrainToCast, in castStart, in targetTerrain, in targetTerrainTransform))
             {
                 return false;
             }

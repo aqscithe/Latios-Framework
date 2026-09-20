@@ -82,7 +82,7 @@ namespace Latios.Psyshock
             var tileRows        = (short)(CollectionHelper.Align(patchRows, 8) / 8);
             root.quartersPerRow = (short)(CollectionHelper.Align(root.tilesPerRow, 8) / 8);
             var quarterRows     = (short)(CollectionHelper.Align(tileRows, 8) / 8);
-            root.sectionsPerRow = (short)(CollectionHelper.Align(root.sectionsPerRow, 8) / 8);
+            root.sectionsPerRow = (short)(CollectionHelper.Align(root.quartersPerRow, 8) / 8);
             var sectionRows     = (short)(CollectionHelper.Align(quarterRows, 8) / 8);
 
             var heightsArray = builder.Allocate(ref root.heights, heightsRowMajor.Length);
@@ -269,7 +269,7 @@ namespace Latios.Psyshock
                                 var     clampedQuadInRow = math.min(patch.startX + quadInRow, previousPerRow - 1);
                                 var     quadOffset       = clampedQuadRow * previousPerRow + clampedQuadInRow;
                                 ref var lowerQuadPatch   = ref previousLevel[quadOffset];
-                                bool    valid            = quadRow == clampedQuadRow && quadInRow == clampedQuadInRow;
+                                bool    valid            = patch.startY + quadRow == clampedQuadRow && patch.startX + quadInRow == clampedQuadInRow;
 
                                 Bits.SetBit(ref patch.isFirstTriangleOrChildPatchValid, quadInPatch,
                                             valid && (lowerQuadPatch.isFirstTriangleOrChildPatchValid | lowerQuadPatch.isSecondTriangleValid) != 0);
@@ -518,7 +518,7 @@ namespace Latios.Psyshock
             packedSearchDomain     = math.clamp(packedSearchDomain, 0, new int4(quadsPerRow - 1, quadRows - 1, quadsPerRow - 1, quadRows - 1));
             if (math.all(packedSearchDomain.xy == packedSearchDomain.zw))
             {
-                var     quadIndex      = minY * quadsPerRow + minX;
+                var     quadIndex      = packedSearchDomain.y * quadsPerRow + packedSearchDomain.x;
                 var     patchIndex2D   = packedSearchDomain.xy / 8;
                 ref var patch          = ref patches[patchIndex2D.y * patchesPerRow + patchIndex2D.x];
                 var     offsetsInPatch = packedSearchDomain.xy % 8;
@@ -537,7 +537,7 @@ namespace Latios.Psyshock
                 return;
             }
             var tileIndices = patchIndices / 8;
-            if (math.all(tileIndices.xy == patchIndices.zw))
+            if (math.all(tileIndices.xy == tileIndices.zw))
             {
                 ref var tile = ref tiles[tileIndices.y * tilesPerRow + tileIndices.x];
                 DoLevel(ref tile, packedSearchDomain, ref processor, 1);
